@@ -1,4 +1,4 @@
-temperatureAsync/***************************************************
+/***************************************************
   This is a library for the Adafruit PT100/P1000 RTD Sensor w/MAX31865
 
   Designed specifically to work with the Adafruit RTD Sensor
@@ -17,24 +17,24 @@ temperatureAsync/***************************************************
 #ifndef ADAFRUIT_MAX31865_H
 #define ADAFRUIT_MAX31865_H
 
-#define MAX31856_CONFIG_REG 0x00
-#define MAX31856_CONFIG_BIAS 0x80
-#define MAX31856_CONFIG_MODEAUTO 0x40
-#define MAX31856_CONFIG_MODEOFF 0x00
-#define MAX31856_CONFIG_1SHOT 0x20
-#define MAX31856_CONFIG_3WIRE 0x10
-#define MAX31856_CONFIG_24WIRE 0x00
-#define MAX31856_CONFIG_FAULTSTAT 0x02
-#define MAX31856_CONFIG_FILT50HZ 0x01
-#define MAX31856_CONFIG_FILT60HZ 0x00
+#define MAX31865_CONFIG_REG 0x00
+#define MAX31865_CONFIG_BIAS 0x80
+#define MAX31865_CONFIG_MODEAUTO 0x40
+#define MAX31865_CONFIG_MODEOFF 0x00
+#define MAX31865_CONFIG_1SHOT 0x20
+#define MAX31865_CONFIG_3WIRE 0x10
+#define MAX31865_CONFIG_24WIRE 0x00
+#define MAX31865_CONFIG_FAULTSTAT 0x02
+#define MAX31865_CONFIG_FILT50HZ 0x01
+#define MAX31865_CONFIG_FILT60HZ 0x00
 
-#define MAX31856_RTDMSB_REG 0x01
-#define MAX31856_RTDLSB_REG 0x02
-#define MAX31856_HFAULTMSB_REG 0x03
-#define MAX31856_HFAULTLSB_REG 0x04
-#define MAX31856_LFAULTMSB_REG 0x05
-#define MAX31856_LFAULTLSB_REG 0x06
-#define MAX31856_FAULTSTAT_REG 0x07
+#define MAX31865_RTDMSB_REG 0x01
+#define MAX31865_RTDLSB_REG 0x02
+#define MAX31865_HFAULTMSB_REG 0x03
+#define MAX31865_HFAULTLSB_REG 0x04
+#define MAX31865_LFAULTMSB_REG 0x05
+#define MAX31865_LFAULTLSB_REG 0x06
+#define MAX31865_FAULTSTAT_REG 0x07
 
 #define MAX31865_FAULT_HIGHTHRESH 0x80
 #define MAX31865_FAULT_LOWTHRESH 0x40
@@ -60,31 +60,42 @@ typedef enum max31865_numwires {
   MAX31865_4WIRE = 0
 } max31865_numwires_t;
 
+typedef enum {
+  MAX31865_FAULT_NONE = 0,
+  MAX31865_FAULT_AUTO,
+  MAX31865_FAULT_MANUAL_RUN,
+  MAX31865_FAULT_MANUAL_FINISH
+} max31865_fault_cycle_t;
+
 /*! Interface class for the MAX31865 RTD Sensor reader */
 class Adafruit_MAX31865 {
 public:
   Adafruit_MAX31865(int8_t spi_cs, int8_t spi_mosi, int8_t spi_miso,
                     int8_t spi_clk);
-  Adafruit_MAX31865(int8_t spi_cs);
+  Adafruit_MAX31865(int8_t spi_cs, SPIClass *theSPI = &SPI);
 
   bool begin(max31865_numwires_t x = MAX31865_2WIRE);
 
-  uint8_t readFault(void);
+  uint8_t readFault(max31865_fault_cycle_t fault_cycle = MAX31865_FAULT_AUTO);
   void clearFault(void);
   uint16_t readRTD();
-  
+
+  void setThresholds(uint16_t lower, uint16_t upper);
+  uint16_t getLowerThreshold(void);
+  uint16_t getUpperThreshold(void);
   bool readRTDAsync(uint16_t& rtd); //added by JD
   float temperatureAsync(float Rt, float RTDnominal, float refResistor); //added by JD
-
   void setWires(max31865_numwires_t wires);
   void autoConvert(bool b);
   void enable50Hz(bool b);
   void enableBias(bool b);
 
   float temperature(float RTDnominal, float refResistor);
+  float calculateTemperature(uint16_t RTDraw, float RTDnominal,
+                             float refResistor);
 
 private:
-  Adafruit_SPIDevice spi_dev = NULL;
+  Adafruit_SPIDevice spi_dev;
 
   void readRegisterN(uint8_t addr, uint8_t buffer[], uint8_t n);
 

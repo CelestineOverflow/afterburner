@@ -34,21 +34,19 @@
 /**************************************************************************/
 //
 Adafruit_MAX31865::Adafruit_MAX31865(int8_t spi_cs, int8_t spi_mosi,
-                                     int8_t spi_miso, int8_t spi_clk) {
-  spi_dev = Adafruit_SPIDevice(spi_cs, spi_clk, spi_miso, spi_mosi, 1000000,
-                               SPI_BITORDER_MSBFIRST, SPI_MODE1);
-}
+                                     int8_t spi_miso, int8_t spi_clk)
+    : spi_dev(spi_cs, spi_clk, spi_miso, spi_mosi, 1000000,
+              SPI_BITORDER_MSBFIRST, SPI_MODE1) {}
 
 /**************************************************************************/
 /*!
     @brief Create the interface object using hardware SPI
-    @param spi_cs the SPI CS pin to use along with the default SPI device
+    @param spi_cs the SPI chip select pin to use
+    @param theSPI the SPI device to use, default is SPI
 */
 /**************************************************************************/
-Adafruit_MAX31865::Adafruit_MAX31865(int8_t spi_cs) {
-  spi_dev =
-      Adafruit_SPIDevice(spi_cs, 1000000, SPI_BITORDER_MSBFIRST, SPI_MODE1);
-}
+Adafruit_MAX31865::Adafruit_MAX31865(int8_t spi_cs, SPIClass *theSPI)
+    : spi_dev(spi_cs, 1000000, SPI_BITORDER_MSBFIRST, SPI_MODE1, theSPI) {}
 
 /**************************************************************************/
 /*!
@@ -64,21 +62,44 @@ bool Adafruit_MAX31865::begin(max31865_numwires_t wires) {
   setWires(wires);
   enableBias(false);
   autoConvert(false);
+  setThresholds(0, 0xFFFF);
   clearFault();
 
   // Serial.print("config: ");
-  // Serial.println(readRegister8(MAX31856_CONFIG_REG), HEX);
+  // Serial.println(readRegister8(MAX31865_CONFIG_REG), HEX);
   return true;
 }
 
 /**************************************************************************/
 /*!
     @brief Read the raw 8-bit FAULTSTAT register
+    @param fault_cycle The fault cycle type to run. Can be MAX31865_FAULT_NONE,
+   MAX31865_FAULT_AUTO, MAX31865_FAULT_MANUAL_RUN, or
+   MAX31865_FAULT_MANUAL_FINISH
     @return The raw unsigned 8-bit FAULT status register
 */
 /**************************************************************************/
-uint8_t Adafruit_MAX31865::readFault(void) {
-  return readRegister8(MAX31856_FAULTSTAT_REG);
+uint8_t Adafruit_MAX31865::readFault(max31865_fault_cycle_t fault_cycle) {
+  if (fault_cycle) {
+    uint8_t cfg_reg = readRegister8(MAX31865_CONFIG_REG);
+    cfg_reg &= 0x11; // mask out wire and filter bits
+    switch (fault_cycle) {
+    case MAX31865_FAULT_AUTO:
+      writeRegister8(MAX31865_CONFIG_REG, (cfg_reg | 0b10000100));
+      delay(1);
+      break;
+    case MAX31865_FAULT_MANUAL_RUN:
+      writeRegister8(MAX31865_CONFIG_REG, (cfg_reg | 0b10001000));
+      return 0;
+    case MAX31865_FAULT_MANUAL_FINISH:
+      writeRegister8(MAX31865_CONFIG_REG, (cfg_reg | 0b10001100));
+      return 0;
+    case MAX31865_FAULT_NONE:
+    default:
+      break;
+    }
+  }
+  return readRegister8(MAX31865_FAULTSTAT_REG);
 }
 
 /**************************************************************************/
@@ -87,10 +108,10 @@ uint8_t Adafruit_MAX31865::readFault(void) {
 */
 /**************************************************************************/
 void Adafruit_MAX31865::clearFault(void) {
-  uint8_t t = readRegister8(MAX31856_CONFIG_REG);
+  uint8_t t = readRegister8(MAX31865_CONFIG_REG);
   t &= ~0x2C;
-  t |= MAX31856_CONFIG_FAULTSTAT;
-  writeRegister8(MAX31856_CONFIG_REG, t);
+  t |= MAX31865_CONFIG_FAULTSTAT;
+  writeRegister8(MAX31865_CONFIG_REG, t);
 }
 
 /**************************************************************************/
@@ -100,13 +121,13 @@ void Adafruit_MAX31865::clearFault(void) {
 */
 /**************************************************************************/
 void Adafruit_MAX31865::enableBias(bool b) {
-  uint8_t t = readRegister8(MAX31856_CONFIG_REG);
+  uint8_t t = readRegister8(MAX31865_CONFIG_REG);
   if (b) {
-    t |= MAX31856_CONFIG_BIAS; // enable bias
+    t |= MAX31865_CONFIG_BIAS; // enable bias
   } else {
-    t &= ~MAX31856_CONFIG_BIAS; // disable bias
+    t &= ~MAX31865_CONFIG_BIAS; // disable bias
   }
-  writeRegister8(MAX31856_CONFIG_REG, t);
+  writeRegister8(MAX31865_CONFIG_REG, t);
 }
 
 /**************************************************************************/
@@ -116,13 +137,13 @@ void Adafruit_MAX31865::enableBias(bool b) {
 */
 /**************************************************************************/
 void Adafruit_MAX31865::autoConvert(bool b) {
-  uint8_t t = readRegister8(MAX31856_CONFIG_REG);
+  uint8_t t = readRegister8(MAX31865_CONFIG_REG);
   if (b) {
-    t |= MAX31856_CONFIG_MODEAUTO; // enable autoconvert
+    t |= MAX31865_CONFIG_MODEAUTO; // enable autoconvert
   } else {
-    t &= ~MAX31856_CONFIG_MODEAUTO; // disable autoconvert
+    t &= ~MAX31865_CONFIG_MODEAUTO; // disable autoconvert
   }
-  writeRegister8(MAX31856_CONFIG_REG, t);
+  writeRegister8(MAX31865_CONFIG_REG, t);
 }
 
 /**************************************************************************/
@@ -133,13 +154,48 @@ void Adafruit_MAX31865::autoConvert(bool b) {
 /**************************************************************************/
 
 void Adafruit_MAX31865::enable50Hz(bool b) {
-  uint8_t t = readRegister8(MAX31856_CONFIG_REG);
+  uint8_t t = readRegister8(MAX31865_CONFIG_REG);
   if (b) {
-    t |= MAX31856_CONFIG_FILT50HZ;
+    t |= MAX31865_CONFIG_FILT50HZ;
   } else {
-    t &= ~MAX31856_CONFIG_FILT50HZ;
+    t &= ~MAX31865_CONFIG_FILT50HZ;
   }
-  writeRegister8(MAX31856_CONFIG_REG, t);
+  writeRegister8(MAX31865_CONFIG_REG, t);
+}
+
+/**************************************************************************/
+/*!
+    @brief Write the lower and upper values into the threshold fault
+    register to values as returned by readRTD()
+    @param lower raw lower threshold
+    @param upper raw upper threshold
+*/
+/**************************************************************************/
+void Adafruit_MAX31865::setThresholds(uint16_t lower, uint16_t upper) {
+  writeRegister8(MAX31865_LFAULTLSB_REG, lower & 0xFF);
+  writeRegister8(MAX31865_LFAULTMSB_REG, lower >> 8);
+  writeRegister8(MAX31865_HFAULTLSB_REG, upper & 0xFF);
+  writeRegister8(MAX31865_HFAULTMSB_REG, upper >> 8);
+}
+
+/**************************************************************************/
+/*!
+    @brief Read the raw 16-bit lower threshold value
+    @return The raw unsigned 16-bit value, NOT temperature!
+*/
+/**************************************************************************/
+uint16_t Adafruit_MAX31865::getLowerThreshold(void) {
+  return readRegister16(MAX31865_LFAULTMSB_REG);
+}
+
+/**************************************************************************/
+/*!
+    @brief Read the raw 16-bit lower threshold value
+    @return The raw unsigned 16-bit value, NOT temperature!
+*/
+/**************************************************************************/
+uint16_t Adafruit_MAX31865::getUpperThreshold(void) {
+  return readRegister16(MAX31865_HFAULTMSB_REG);
 }
 
 /**************************************************************************/
@@ -150,14 +206,14 @@ void Adafruit_MAX31865::enable50Hz(bool b) {
 */
 /**************************************************************************/
 void Adafruit_MAX31865::setWires(max31865_numwires_t wires) {
-  uint8_t t = readRegister8(MAX31856_CONFIG_REG);
+  uint8_t t = readRegister8(MAX31865_CONFIG_REG);
   if (wires == MAX31865_3WIRE) {
-    t |= MAX31856_CONFIG_3WIRE;
+    t |= MAX31865_CONFIG_3WIRE;
   } else {
     // 2 or 4 wire
-    t &= ~MAX31856_CONFIG_3WIRE;
+    t &= ~MAX31865_CONFIG_3WIRE;
   }
-  writeRegister8(MAX31856_CONFIG_REG, t);
+  writeRegister8(MAX31865_CONFIG_REG, t);
 }
 
 /**************************************************************************/
@@ -173,12 +229,28 @@ void Adafruit_MAX31865::setWires(max31865_numwires_t wires) {
     @returns Temperature in C
 */
 /**************************************************************************/
-
-
 float Adafruit_MAX31865::temperature(float RTDnominal, float refResistor) {
+  return calculateTemperature(readRTD(), RTDnominal, refResistor);
+}
+/**************************************************************************/
+/*!
+    @brief Calculate the temperature in C from the RTD through calculation of
+   the resistance. Uses
+   http://www.analog.com/media/en/technical-documentation/application-notes/AN709_0.pdf
+   technique
+    @param RTDraw The raw 16-bit value from the RTD_REG
+    @param RTDnominal The 'nominal' resistance of the RTD sensor, usually 100
+    or 1000
+    @param refResistor The value of the matching reference resistor, usually
+    430 or 4300
+    @returns Temperature in C
+*/
+/**************************************************************************/
+float Adafruit_MAX31865::calculateTemperature(uint16_t RTDraw, float RTDnominal,
+                                              float refResistor) {
   float Z1, Z2, Z3, Z4, Rt, temp;
 
-  Rt = readRTD();
+  Rt = RTDraw;
   Rt /= 32768;
   Rt *= refResistor;
 
@@ -215,7 +287,30 @@ float Adafruit_MAX31865::temperature(float RTDnominal, float refResistor) {
   return temp;
 }
 
+/**************************************************************************/
+/*!
+    @brief Read the raw 16-bit value from the RTD_REG in one shot mode
+    @return The raw unsigned 16-bit value, NOT temperature!
+*/
+/**************************************************************************/
+uint16_t Adafruit_MAX31865::readRTD(void) {
+  clearFault();
+  enableBias(true);
+  delay(10);
+  uint8_t t = readRegister8(MAX31865_CONFIG_REG);
+  t |= MAX31865_CONFIG_1SHOT;
+  writeRegister8(MAX31865_CONFIG_REG, t);
+  delay(65);
 
+  uint16_t rtd = readRegister16(MAX31865_RTDMSB_REG);
+
+  enableBias(false); // Disable bias current again to reduce selfheating.
+
+  // remove fault
+  rtd >>= 1;
+
+  return rtd;
+}
 
 float Adafruit_MAX31865::temperatureAsync(float Rt, float RTDnominal, float refResistor) {
   float Z1, Z2, Z3, Z4, temp;
@@ -253,26 +348,6 @@ float Adafruit_MAX31865::temperatureAsync(float Rt, float RTDnominal, float refR
 
   return temp;
 }
-
-
-uint16_t Adafruit_MAX31865::readRTD(void) {
-  clearFault();
-  enableBias(true);
-  delay(10);
-  uint8_t t = readRegister8(MAX31856_CONFIG_REG);
-  t |= MAX31856_CONFIG_1SHOT;
-  writeRegister8(MAX31856_CONFIG_REG, t);
-  delay(65);
-
-  uint16_t rtd = readRegister16(MAX31856_RTDMSB_REG);
-
-  // remove fault
-  rtd >>= 1;
-
-  return rtd;
-}
-
-
 bool Adafruit_MAX31865::readRTDAsync(uint16_t & rtd) {
   enum t_state : byte {STATE1, STATE2, STATE3};
   static t_state state = STATE1;
@@ -290,9 +365,9 @@ bool Adafruit_MAX31865::readRTDAsync(uint16_t & rtd) {
 
     case STATE2:
       if (millis() - chrono >= 10) {
-        uint8_t t = readRegister8(MAX31856_CONFIG_REG);
-        t |= MAX31856_CONFIG_1SHOT;
-        writeRegister8(MAX31856_CONFIG_REG, t);
+        uint8_t t = readRegister8(MAX31865_CONFIG_REG);
+        t |= MAX31865_CONFIG_1SHOT;
+        writeRegister8(MAX31865_CONFIG_REG, t);
         chrono = millis();
         state = STATE3;
       }
@@ -300,7 +375,7 @@ bool Adafruit_MAX31865::readRTDAsync(uint16_t & rtd) {
 
     case STATE3:
       if (millis() - chrono >= 65) {
-        rtd = readRegister16(MAX31856_RTDMSB_REG);
+        rtd = readRegister16(MAX31865_RTDMSB_REG);
         rtd >>= 1;        // remove fault
         state = STATE1;   // get ready for next time
         valueAvailable = true; // signal computation is done
@@ -309,88 +384,6 @@ bool Adafruit_MAX31865::readRTDAsync(uint16_t & rtd) {
   }
   return valueAvailable;
 }
-
-
-
-
-
-// bool Adafruit_MAX31865::readRTDAsync(uint16_t& rtd) {
-//   enum t_state : byte {STATE1, STATE2, STATE3};
-//   static t_state state = STATE1;
-//   static uint32_t chrono = 0;
-//   bool valueAvailable = false;
-  
-//   switch (state) {
-
-//     case STATE1:
-//       clearFault();
-//       enableBias(true);
-//       chrono = millis();
-//       state = STATE2;
-//       break;
-
-//     case STATE2:
-//       if (millis() - chrono >= 10) {
-//         uint8_t t = readRegister8(MAX31856_CONFIG_REG);
-//         t |= MAX31856_CONFIG_1SHOT;
-//         writeRegister8(MAX31856_CONFIG_REG, t);
-//         chrono = millis();
-//         state = STATE3;
-//       }
-//       break;
-
-//     case STATE3:
-//       if (millis() - chrono >= 65) {
-//         uint16_t rtd = readRegister16(MAX31856_RTDMSB_REG);
-//         rtd >>= 1;        // remove fault
-//         state = STATE1;   // get ready for next time
-//         valueAvailable = true; // signal computation is done
-//       }
-//       break;
-//   }
-//   return valueAvailable;
-// }
-
-
-/*
-
-int period1 = 10;
-int period2 = 65;
-
-unsigned long time_now = 0;
-
-
-uint16_t Adafruit_MAX31865::readRTD(void) {
-  clearFault();
-  enableBias(true);
-
-  if(millis() > time_now + period1){
-        time_now = millis();
-
-          //delay(10);
-          uint8_t t = readRegister8(MAX31856_CONFIG_REG);
-          t |= MAX31856_CONFIG_1SHOT;
-          writeRegister8(MAX31856_CONFIG_REG, t);
-
-
-          if(millis() > time_now + period2){
-            time_now = millis();
-
-            //delay(65);
-            uint16_t rtd = readRegister16(MAX31856_RTDMSB_REG);
-
-            // remove fault
-            rtd >>= 1;
-
-            return rtd;       
-    }     
-  }
-}
-*/
-
-
-
-
 
 /**********************************************/
 

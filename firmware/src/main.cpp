@@ -7,6 +7,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include "driver/ledc.h"
+#include <ArduinoJson.h>
 #include "esp_err.h"
 using namespace esp_panel::drivers;
 using namespace esp_panel::board;
@@ -483,27 +484,30 @@ void control(){
 
   // 6) Constrain to 0..255 (8-bit PWM duty cycle):
   int outputDuty = constrain((int)rawOutput, 0, 255);
-  // 8) Print some debug info:
-  Serial.print("T_set: ");
-  Serial.print(set_temp_values[0], 2);
-  Serial.print("  T_meas: ");
-  Serial.print(temp_sensor_values[0], 2);
-  Serial.print("  Error: ");
-  Serial.print(error, 2);
-  Serial.print("  P: ");
-  Serial.print(p * error, 2);
-  Serial.print("  I: ");
-  Serial.print(i * integral, 2);
-  Serial.print("  D: ");
-  Serial.print(d * derivative, 2);
-  Serial.print("  → Duty: ");
-  Serial.println(outputDuty);
-
-  // 9) Save for next iteration:
   lastError = error;
   lastTime  = now;
   ledc_set_duty(LEDC_MODE, LEDC_CHANNEL,255); // turn on heater
   ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
+}
+
+
+float forcereading = 0.0;
+
+void report(){
+  JsonDocument doc;
+  JsonArray sensors = doc["sensors"].to<JsonArray>();
+  sensors.add(temp_sensor_values[0]);
+  sensors.add(temp_sensor_values[1]);
+  sensors.add(temp_sensor_values[2]);
+  sensors.add(temp_sensor_values[3]);
+  JsonArray heaters = doc["heaters"].to<JsonArray>();
+  heaters.add(set_temp_values[0]);
+  heaters.add(set_temp_values[1]);
+  heaters.add(set_temp_values[2]);
+  heaters.add(set_temp_values[3]);
+  doc["force"] = forcereading;
+  serializeJson(doc, Serial);
+  Serial.println();
 }
 
 void loop()
@@ -522,6 +526,7 @@ void loop()
         lvgl_port_unlock();
     }
     control();
+    report();
 
     // // print the current shunt voltage
     // float shuntVoltageValue = shuntVoltage();
@@ -565,14 +570,16 @@ void loop()
     }
     long raw = readRaw();
     
-      if (raw != 0) {
-        float force = raw / 10000.0f;
-        char buf[16];
-        sprintf(buf, "%.1f N", force);
-  
-        lvgl_port_lock(-1);
-        lv_label_set_text(force_value, buf);
-        lv_chart_set_next_value(force_chart, force_series, force);
-        lvgl_port_unlock();
-      }
+    if (raw != 0) {
+      forcereading = raw / 10000.0f;
+      char buf[16];
+      sprintf(buf, "%.1f N", forcereading);
+
+      lvgl_port_lock(-1);
+      lv_label_set_text(force_value, buf);
+      lv_chart_set_next_value(force_chart, force_series, forcereading);
+      lvgl_port_unlock();
+    }
+
+    
 }
