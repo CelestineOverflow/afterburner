@@ -4,13 +4,6 @@
     import { temps } from "$lib/Serial.svelte";
 </script>
 
-
-
-
-
-
-
-
 <div class="grid grid-cols-2 gap-0">
   <div class="grid gap-6 md:grid-cols-2">
         {#each temps.controllers as _, i}
@@ -22,4 +15,5 @@
         {/each}
     </div>
     <ForceChart/>
+    <p>test</p>
 </div>
