@@ -5,8 +5,8 @@
     let canvas: HTMLCanvasElement;
     let chart: Chart<"line", number[], number>;
     const MAX_POINTS = 100;
-    const labels: number[] = Array(MAX_POINTS).fill(0); // init 100 slots
-    const values: number[] = Array(MAX_POINTS).fill(0); // init 100 zeros
+    const labels: string[] = Array(MAX_POINTS).fill("");
+    const values: number[] = Array(MAX_POINTS).fill(0);
     onMount(() => {
         const ctx = canvas.getContext("2d")!;
         chart = new Chart(ctx, {
@@ -31,7 +31,7 @@
     $effect(() => {
         const f = serial.latest_json?.force;
         if (chart && f !== undefined) {
-            labels.push(Date.now()); // add new timestamp
+            labels.push(""); // add new timestamp
             values.push(+f); // add new force value
             if (labels.length > MAX_POINTS) {
                 labels.shift(); // keep buffer size
@@ -43,4 +43,10 @@
     onDestroy(() => chart?.destroy());
 </script>
 
-<p><canvas bind:this={canvas}></canvas></p>
+
+<div class="card bg-base-100 w-96 shadow-sm">
+  <div class="card-body">
+    <h2 class="card-title">Force</h2>
+      <canvas bind:this={canvas}></canvas>
+  </div>
+</div>

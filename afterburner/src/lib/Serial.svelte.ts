@@ -1,4 +1,5 @@
 import { SerialPort } from "tauri-plugin-serialplugin";
+// import { state, effect } from "svelte";
 import { sendNotification } from "@tauri-apps/plugin-notification";
 export const serial = $state({
     connected: false,
@@ -39,4 +40,21 @@ export async function disconnect() {
         await serial.port.close();
         serial.connected = false;
     }
+}
+
+export const temps = $state({
+	controllers: [
+		{ current: 25, target: 50 },
+		{ current: 27, target: 60 },
+		{ current: 29, target: 55 },
+		{ current: 31, target: 65 }
+	]
+});
+
+// mock up data update function on temps
+export function updateTemps() {
+    temps.controllers.forEach((controller, index) => {
+        controller.current += (Math.random() - 0.5) * 2; // Randomly change current temperature
+        controller.target += (Math.random() - 0.5) * 2; // Randomly change target temperature
+    });
 }
