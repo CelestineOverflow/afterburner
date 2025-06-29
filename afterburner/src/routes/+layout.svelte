@@ -6,6 +6,7 @@
   import { serial, connect } from "$lib/Serial.svelte";
   import { disconnect } from "../lib/Serial.svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+    import Updater from "$lib/Updater.svelte";
 
   let appWindow = null;
   let available_ports = $state<string[]>([]);
@@ -161,4 +162,6 @@
   </p>
 {/if}
 
+
+<Updater />
 {@render children()}
