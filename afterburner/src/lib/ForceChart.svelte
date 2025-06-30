@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from "svelte";
     import Chart from "chart.js/auto";
-    import { serial } from "./Serial.svelte";
+    import { force } from "./Serial.svelte";
     let canvas: HTMLCanvasElement;
     let chart: Chart<"line", number[], number>;
     const MAX_POINTS = 100;
@@ -29,10 +29,9 @@
         });
     });
     $effect(() => {
-        const f = serial.latest_json?.force;
-        if (chart && f !== undefined) {
+        if (chart && force.current !== undefined) {
             labels.push(""); // add new timestamp
-            values.push(+f); // add new force value
+            values.push(force.current); // add new force value
             if (labels.length > MAX_POINTS) {
                 labels.shift(); // keep buffer size
                 values.shift();

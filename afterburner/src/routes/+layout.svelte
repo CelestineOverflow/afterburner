@@ -14,7 +14,6 @@
 
   onMount(async () => {
     available_ports = Object.keys(await SerialPort.available_ports());
-    console.log("Available ports:", available_ports);
     appWindow = getCurrentWindow();
 
   });
@@ -22,7 +21,7 @@
 
 <!-- ────────────────────────── NAVBAR ────────────────────────── -->
 <div
-  class="navbar bg-primary text-primary-content h-8 min-h-0 px-2 select-none"
+  class="navbar fixed top-0 left-0 z-50 bg-primary text-primary-content h-8 min-h-0 px-2 select-none"
   data-tauri-drag-region
 >
   <!-- Brand -->
@@ -155,13 +154,9 @@
   </div>
 </div>
 
-<!-- Latest serial data line -->
-{#if serial.latest}
-  <p class="px-2 py-1 text-xs font-mono break-all text-base-content/80">
-    {serial.latest}
-  </p>
-{/if}
-
-
 <Updater />
-{@render children()}
+
+<main class="mt-8 px-4">
+  {@render children()}
+</main>
+

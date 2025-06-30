@@ -1,21 +1,24 @@
 <script lang="ts">
 	import { onMount, onDestroy } from "svelte";
 	import Chart from "chart.js/auto";
-	import { updateTemps /* setTargetTemp, disableChannel */ } from "./Serial.svelte";
+    import { setHeater, setTemperature } from "./Serial.svelte";
 
 	/** Props — unchanged ✅ */
 	const {
 		currentPath,
 		targetPath,
+		enabled,
+		index,
 		label = "Channel",
-		maxPoints = 120,
-		source
+		maxPoints = 100,
+
 	}: {
-		currentPath: string;
-		targetPath: string;
+		currentPath: any;
+		targetPath: any;
+		enabled: boolean;
+		index: number;
 		label?: string;
 		maxPoints?: number;
-		source: any;
 	} = $props();
 
 	let canvas: HTMLCanvasElement;
@@ -25,21 +28,23 @@
 	const tgtVals: number[] = Array(maxPoints).fill(NaN);
 
 	/* ───────────────────── UI state ───────────────────── */
-	let newTarget = "";
-	let disabled  = false;
+	let newTarget = $state("");
+	let disabled  = $state(false);
 
 	const get = (obj: any, path: string) =>
 		path.split(".").reduce((o, k) => (o ? o[k] : undefined), obj);
 
 	function sendTarget() {
-		const v = +newTarget;
-		if (!Number.isFinite(v)) return;
-		// setTargetTemp?.(v);
-		newTarget = "";
+		// Convert input to a number if not between 0 and 250 console.error("Invalid target temperature");
+		const numeric = parseFloat(newTarget);
+		if (isNaN(numeric) || numeric < 0 || numeric > 250) {
+			console.error("Invalid target temperature");
+			return;
+		}
+		setTemperature(index, numeric);
 	}
 	function toggleDisable() {
-		disabled = !disabled;
-		// disableChannel?.(disabled);
+		setHeater(index, !disabled);
 	}
 
 	onMount(() => {
@@ -77,25 +82,24 @@
 				}
 			}
 		});
-
-		const interval = setInterval(updateTemps, 750);
-		onDestroy(() => { clearInterval(interval); chart.destroy(); });
+		// onDestroy(() => { clearInterval(interval); chart.destroy(); });
 	});
 
 	$effect(() => {
 		if (!chart) return;
-		const cur = +get(source, currentPath);
-		const tgt = +get(source, targetPath);
-		if (Number.isFinite(cur) && Number.isFinite(tgt)) {
-			labels.push("");
-			curVals.push(cur);
-			tgtVals.push(tgt);
-			if (labels.length > maxPoints) {
-				labels.shift(); curVals.shift(); tgtVals.shift();
-			}
-			chart.update("none");
+		labels.push("");
+		curVals.push(currentPath);
+		tgtVals.push(targetPath);
+		if (labels.length > maxPoints) {
+			labels.shift(); curVals.shift(); tgtVals.shift();
 		}
+		chart.update("none");
 	});
+
+	$effect(() => {
+		disabled = enabled;
+	});
+
 </script>
 
 <!-- ───────────────────── Card UI ───────────────────── -->
@@ -111,21 +115,31 @@
 		<!-- target input + button -->
 		<label class="flex items-center gap-2">
 			<input
-				type="number"
+				type="text"
 				bind:value={newTarget}
 				placeholder="Target °C"
 				class="input input-sm input-bordered w-24"
+				onkeyup={(e) => {
+					if (e.key === 'Enter') {
+						sendTarget();
+					}
+				}}
 			/>
-			<button class="btn btn-sm btn-primary" on:click={sendTarget}>
+			<button
+				type="button"
+				class="btn btn-sm btn-primary"
+				onclick={sendTarget}
+				
+			>
 				Set&nbsp;Target
 			</button>
             <button
 				class="btn btn-sm"
 				class:selected={!disabled && 'btn-success'}
 				class:btn-error={disabled}
-				on:click={toggleDisable}
+				onclick={toggleDisable}
 			>
-				{disabled ? 'Enable' : 'Disable'}
+				{disabled ? 'Disable' : 'Enable'}
 			</button>
 		</label>
 

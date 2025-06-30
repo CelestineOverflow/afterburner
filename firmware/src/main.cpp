@@ -64,10 +64,18 @@ float temp_sensor_values[] = {
     55.4};
 
 float set_temp_values[] = {
-    200.0,
-    60.0,
-    60.0,
-    60.0};
+    20.0,
+    20.0,
+    20.0,
+    20.0};
+
+bool enable_heater[] = {
+    false,
+    false,
+    false,
+    false};
+
+
 
 // UI object
 lv_obj_t *temp_display;
@@ -505,9 +513,56 @@ void report(){
   heaters.add(set_temp_values[1]);
   heaters.add(set_temp_values[2]);
   heaters.add(set_temp_values[3]);
+  JsonArray enable = doc["enable"].to<JsonArray>();
+  enable.add(enable_heater[0]);
+  enable.add(enable_heater[1]);
+  enable.add(enable_heater[2]);
+  enable.add(enable_heater[3]);
   doc["force"] = forcereading;
   serializeJson(doc, Serial);
   Serial.println();
+}
+
+void proccessJson(const char* json) {
+    StaticJsonDocument<256> doc;
+    DeserializationError error = deserializeJson(doc, json);
+    if (error) {
+        Serial.print(F("deserializeJson() failed: "));
+        Serial.println(error.f_str());
+        return;
+    }
+    // Process the JSON data
+    // format 
+    // {"heater": 0, "set_temp": 200.0}
+    if (doc["heater"].is<int>()) {
+        int heaterIndex = doc["heater"];
+        if (heaterIndex >= 0 && heaterIndex < 4) {
+            float setTemp = doc["set_temp"];
+            set_temp_values[heaterIndex] = setTemp;
+            char value_text[16];
+            sprintf(value_text, "%.1f °C", setTemp);
+            lvgl_port_lock(-1);
+            lv_label_set_text(set_temp_labels[heaterIndex], value_text);
+            lvgl_port_unlock();
+        } else {
+            Serial.println("Invalid heater index in JSON");
+        }
+    } else {
+        Serial.println("No heater key in JSON");
+    }
+    // Process enable/disable specific heaters by index
+    // {"heater": 0, "enable": true}
+    if (doc["heater"].is<int>() && doc["enable"].is<bool>()) {
+        int heaterIndex = doc["heater"];
+        bool enable = doc["enable"];
+        if (heaterIndex >= 0 && heaterIndex < 4) {
+            enable_heater[heaterIndex] = enable;
+        } else {
+            Serial.println("Invalid heater index in JSON");
+        }
+    } else {
+        Serial.println("No heater or enable key in JSON");
+    }
 }
 
 void loop()
@@ -527,27 +582,11 @@ void loop()
     }
     control();
     report();
-
-    // // print the current shunt voltage
-    // float shuntVoltageValue = shuntVoltage();
-    // Serial.print("Shunt Voltage: ");
-    // Serial.print(shuntVoltageValue, 6);
-    // Serial.println(" V");
-    // // print the current bus voltage
-    // float busVoltageValue = busVoltage();
-    // Serial.print("Bus Voltage: ");
-    // Serial.print(busVoltageValue, 6);
-    // Serial.println(" V");
-    // // print the current in amps
-    // float currentValue = current();
-    // Serial.print("Current: ");
-    // Serial.print(currentValue, 6);
-    // Serial.println(" A");
-    // // print the power in watts
-    // float powerValue = power();
-    // Serial.print("Power: ");
-    // Serial.print(powerValue, 6);
-    // Serial.println(" W");
+    //check for incoming JSON data
+    if (Serial.available() > 0) {
+        String json = Serial.readStringUntil('\n');
+        proccessJson(json.c_str());
+    }
 
 
     lv_timer_handler();
