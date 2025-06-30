@@ -494,7 +494,7 @@ void control(){
   int outputDuty = constrain((int)rawOutput, 0, 255);
   lastError = error;
   lastTime  = now;
-  ledc_set_duty(LEDC_MODE, LEDC_CHANNEL,255); // turn on heater
+  ledc_set_duty(LEDC_MODE, LEDC_CHANNEL,outputDuty); // turn on heater
   ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
 }
 

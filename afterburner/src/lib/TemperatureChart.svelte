@@ -37,7 +37,7 @@
 	function sendTarget() {
 		// Convert input to a number if not between 0 and 250 console.error("Invalid target temperature");
 		const numeric = parseFloat(newTarget);
-		if (isNaN(numeric) || numeric < 0 || numeric > 250) {
+		if (isNaN(numeric) || numeric < 0 || numeric > 350) {
 			console.error("Invalid target temperature");
 			return;
 		}
