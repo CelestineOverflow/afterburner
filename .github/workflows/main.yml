@@ -1,31 +1,23 @@
 name: publish-windows
-
 on:
   push:
     branches:
       - main
-
 jobs:
   windows-build:
     runs-on: windows-latest
     permissions:
       contents: write
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: lts/*
-
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-
       - name: Install frontend deps
         run: npm ci
-        working-directory: afterburner
-
       - name: Build & release with Tauri
         uses: tauri-apps/tauri-action@v0
         env:
@@ -33,10 +25,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          projectPath: afterburner
           tagName: v__VERSION__
           releaseName: Afterburner v__VERSION__
           releaseBody: Auto-generated build – see assets below.
           releaseDraft: false
           prerelease: false
-          args: ""
