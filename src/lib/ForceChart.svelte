@@ -1,4 +1,4 @@
-<script lang="ts">
+<!-- <script lang="ts">
     import { onMount, onDestroy } from "svelte";
     import Chart from "chart.js/auto";
     import { force } from "./Serial.svelte";
@@ -48,4 +48,4 @@
     <h2 class="card-title">Force</h2>
       <canvas bind:this={canvas}></canvas>
   </div>
-</div>
+</div> -->

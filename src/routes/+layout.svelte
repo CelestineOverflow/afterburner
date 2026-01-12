@@ -1,4 +1,3 @@
-
 <script lang="ts">
   import "../app.css";
   import { onMount } from "svelte";
@@ -6,7 +5,7 @@
   import { serial, connect } from "$lib/Serial.svelte";
   import { disconnect } from "../lib/Serial.svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-    import Updater from "$lib/Updater.svelte";
+  import Updater from "$lib/Updater.svelte";
 
   let appWindow = null;
   let available_ports = $state<string[]>([]);
@@ -15,7 +14,6 @@
   onMount(async () => {
     available_ports = Object.keys(await SerialPort.available_ports());
     appWindow = getCurrentWindow();
-
   });
 </script>
 
@@ -56,12 +54,11 @@
         Disconnect
       </button>
     {:else}
+    <a  class="btn btn-xs gap-1 btn-success" href="/">D</a>
+    <a  class="btn btn-xs gap-1 btn-success" href="/flash">Flash</a>
       <!-- DISCONNECTED: outline button opens port list; click on port item connects -->
       <details class="dropdown">
-        <summary
-          class="btn btn-xs gap-1 btn-outline"
-          aria-label="Connect"
-        >
+        <summary class="btn btn-xs gap-1 btn-outline" aria-label="Connect">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             class="h-3 w-3"
@@ -95,10 +92,14 @@
     <!-- Status dot -->
     <span class="relative flex h-2 w-2">
       <span
-        class="animate-ping absolute inline-flex h-full w-full rounded-full {serial.connected ? 'bg-success' : 'bg-error'} opacity-70"
+        class="animate-ping absolute inline-flex h-full w-full rounded-full {serial.connected
+          ? 'bg-success'
+          : 'bg-error'} opacity-70"
       ></span>
       <span
-        class="relative inline-flex rounded-full h-2 w-2 {serial.connected ? 'bg-success' : 'bg-error'}"
+        class="relative inline-flex rounded-full h-2 w-2 {serial.connected
+          ? 'bg-success'
+          : 'bg-error'}"
       ></span>
     </span>
 
@@ -148,7 +149,11 @@
         stroke="currentColor"
         stroke-width="2"
       >
-        <path stroke-linecap="round" stroke-linejoin="round" d="M6 6l12 12M6 18L18 6" />
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M6 6l12 12M6 18L18 6"
+        />
       </svg>
     </button>
   </div>
@@ -159,4 +164,3 @@
 <main class="mt-8 px-4">
   {@render children()}
 </main>
-
