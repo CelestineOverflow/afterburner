@@ -181,6 +181,11 @@
                 >{(power_meter_data.current_ma * 0.001).toFixed(3)} A</span
             >
         </div>
+        <div class="stat-desc">
+            PWM Duty: <span class="font-bold text-success"
+                > {((pid_status_data.pwm_duty / 255) * 100).toFixed(1)} %</span
+            >
+        </div>
     </div>
 </div>
 

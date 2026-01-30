@@ -17,7 +17,8 @@ export const loadcell_data = $state({ loadcell: 0 });
 export const pid_status_data = $state({ 
     type: "", 
     target_temperature: 0, 
-    heater_enabled: false 
+    heater_enabled: false,
+    pwm_duty: 0
 });
 
 export async function connect(path: string) {
@@ -72,6 +73,7 @@ export async function connect(path: string) {
                                 pid_status_data.type = serial.latest_json.type;
                                 pid_status_data.target_temperature = serial.latest_json.target_temperature;
                                 pid_status_data.heater_enabled = serial.latest_json.heater_enabled;
+                                pid_status_data.pwm_duty = serial.latest_json.pwm_duty;
                             }
                         } catch (error) {
                             console.error(`Failed to parse JSON: ${error} | Data: ${serial.latest}`);
