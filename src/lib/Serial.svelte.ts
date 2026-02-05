@@ -14,6 +14,12 @@ let unlistenDisconnected: (() => void) | null = null;
 export const power_meter_data = $state({ voltage_mv: 0, current_ma: 0, power_mw: 0 });
 export const temperature_data = $state({ temperature: 0.0 });
 export const loadcell_data = $state({ loadcell: 0 });
+export const loadcell_config = $state({
+    zero_point: -2160129,
+    multiplier: -0.00041,
+    force: 0.0
+});
+
 export const pid_status_data = $state({ 
     type: "", 
     target_temperature: 0, 
@@ -66,6 +72,7 @@ export async function connect(path: string) {
                             // Handle loadcell data
                             if ("loadcell" in serial.latest_json) {
                                 loadcell_data.loadcell = serial.latest_json.loadcell;
+                                loadcell_config.force = (serial.latest_json.loadcell - loadcell_config.zero_point) * loadcell_config.multiplier;
                             }
                             
                             // Handle PID status
