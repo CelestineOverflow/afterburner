@@ -14,11 +14,6 @@ let unlistenDisconnected: (() => void) | null = null;
 export const power_meter_data = $state({ voltage_mv: 0, current_ma: 0, power_mw: 0 });
 export const temperature_data = $state({ temperature: 0.0 });
 export const loadcell_data = $state({ loadcell: 0 });
-export const loadcell_config = $state({
-    zero_point: -2160129,
-    multiplier: -0.00041,
-    force: 0.0
-});
 
 export const pid_status_data = $state({ 
     type: "", 
@@ -72,7 +67,6 @@ export async function connect(path: string) {
                             // Handle loadcell data
                             if ("loadcell" in serial.latest_json) {
                                 loadcell_data.loadcell = serial.latest_json.loadcell;
-                                loadcell_config.force = (serial.latest_json.loadcell - loadcell_config.zero_point) * loadcell_config.multiplier;
                             }
                             
                             // Handle PID status
@@ -147,6 +141,29 @@ export async function enableHeater(enabled: boolean) {
     };
     await sendCommand(JSON.stringify(command));
 }
+
+/**
+ * Set the zero pointof the force sensor
+ * 
+ */
+export async function setZeroPoint() {
+    const command = {
+        type: "set_loadcell_zero",
+        value: true
+    };
+    await sendCommand(JSON.stringify(command));
+}
+
+
+
+export async function setMultiplier(current_force: number) {
+    const command = {
+        type: "set_loadcell_multiplier",
+        value: current_force
+    };
+    await sendCommand(JSON.stringify(command));
+}
+
 
 /**
  * Convenience function to enable the heater

@@ -6,7 +6,12 @@
         pid_status_data,
         setTargetTemperature,
         enableHeater,
-        loadcell_config,
+
+        setZeroPoint,
+
+        setMultiplier
+
+
     } from "$lib/Serial.svelte";
     import TemperatureChart from "$lib/TemperatureChart.svelte";
 
@@ -42,18 +47,7 @@
         }
     }
 
-    function calculateMultiplier(userForceGrams: number) {
-        const rawLoadcell = loadcell_data.loadcell - loadcell_config.zero_point;
-        if (rawLoadcell === 0) {
-            alert("Raw loadcell value is zero. Cannot calculate multiplier.");
-            return;
-        }
-        const gramsPerUnit = userForceGrams / rawLoadcell;
-        loadcell_config.multiplier = gramsPerUnit;
-        alert(
-            `Calibration complete. New multiplier: ${gramsPerUnit} grams/unit`
-        );
-    }   
+
 </script>
 
 <svelte:head>
@@ -160,16 +154,16 @@
         </div>
         <div class="stat-title">Force</div>
         <!-- <div class="stat-value text-secondary">raw {loadcell_data.loadcell}</div> -->
-        <div class="stat-value text-secondary">force {loadcell_config.force.toFixed(2)}</div>
+        <div class="stat-value text-secondary">force {loadcell_data.loadcell.toFixed(2)}</div>
         <button
             class="btn btn-sm btn-outline mt-2"
             onclick={() => {
-                loadcell_config.zero_point = loadcell_data.loadcell;
+                setZeroPoint();
             }}
         >
             Calibrate Zero
         </button>
-        <button
+         <button
             class="btn btn-sm btn-outline mt-2 ml-2"
             onclick={() => {
                 const userMultiplier = prompt(
@@ -177,7 +171,7 @@
                 );
                 if (userMultiplier !== null) {
                     const parsed = parseFloat(userMultiplier);
-                    calculateMultiplier(parsed);
+                    setMultiplier(parsed);
                 }
             }}
         >
