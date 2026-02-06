@@ -34,7 +34,7 @@ export async function connect(path: string) {
         await serial.port.startListening();
         const unlisten = await listen("external-data", (event) => {
             console.log("Received external data:", event.payload);
-            // await sendCommand(JSON.stringify(event.payload));
+            sendCommandJson(event.payload);
         });
         serial.port.listen((data: Uint8Array | string) => {
             try {
@@ -83,7 +83,7 @@ export async function connect(path: string) {
                                 pid_status_data.pwm_duty = serial.latest_json.pwm_duty;
                             }
                         } catch (error) {
-                            console.error(`Failed to parse JSON: ${error} | Data: ${serial.latest}`);
+                            // console.error(`Failed to parse JSON: ${error} | Data: ${serial.latest}`);
                         }
                     } else {
                         console.debug(`Non-JSON message: ${serial.latest}`);
@@ -111,12 +111,28 @@ export async function connect(path: string) {
 }
 
 export async function sendCommand(command: string) {
+    console.log(command)
     if (!serial.port || !serial.connected) {
         throw new Error("Serial port is not connected");
     }
 
     try {
         await serial.port.write(`${command}\n`);
+        console.debug(`Sent command: ${command}`);
+    } catch (error) {
+        console.error(`Failed to send command: ${error}`);
+        throw error;
+    }
+}
+
+export async function sendCommandJson(command: any) {
+    console.log(command)
+    if (!serial.port || !serial.connected) {
+        throw new Error("Serial port is not connected");
+    }
+
+    try {
+        await serial.port.write(`${JSON.stringify(command)}\n`);
         console.debug(`Sent command: ${command}`);
     } catch (error) {
         console.error(`Failed to send command: ${error}`);
