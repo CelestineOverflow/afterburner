@@ -155,15 +155,18 @@
         <div class="stat-title">Force</div>
         <!-- <div class="stat-value text-secondary">raw {loadcell_data.loadcell}</div> -->
         <div class="stat-value text-secondary">force {loadcell_data.loadcell.toFixed(2)}</div>
-        <button
+       
+        
+        <div class="flex flex-row">
+        <div class="basis-3xs"> <button
             class="btn btn-sm btn-outline mt-2"
             onclick={() => {
                 setZeroPoint();
             }}
         >
             Calibrate Zero
-        </button>
-         <button
+        </button></div>
+        <div class="basis-2xs"> <button
             class="btn btn-sm btn-outline mt-2 ml-2"
             onclick={() => {
                 const userMultiplier = prompt(
@@ -176,7 +179,8 @@
             }}
         >
             Calibrate Force
-        </button>
+        </button></div>
+        </div>
     </div>
 
     <!-- Power Monitor Display -->
