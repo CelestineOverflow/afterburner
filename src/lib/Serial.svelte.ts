@@ -15,6 +15,7 @@ let unlistenDisconnected: (() => void) | null = null;
 export const power_meter_data = $state({ voltage_mv: 0, current_ma: 0, power_mw: 0 });
 export const temperature_data = $state({ temperature: 0.0 });
 export const loadcell_data = $state({ loadcell: 0 });
+export const pid_values = $state({ p: 0.0 , d: 0.0 , i : 0.0});
 
 export const pid_status_data = $state({
     type: "",
@@ -71,8 +72,9 @@ export async function connect(path: string) {
                             }
 
                             // Handle loadcell data
-                            if ("loadcell" in serial.latest_json) {
-                                loadcell_data.loadcell = serial.latest_json.loadcell;
+                            if ("loadcell_force" in serial.latest_json) {
+                                loadcell_data.loadcell = serial.latest_json.loadcell_force;
+
                             }
 
                             // Handle PID status
@@ -81,6 +83,9 @@ export async function connect(path: string) {
                                 pid_status_data.target_temperature = serial.latest_json.target_temperature;
                                 pid_status_data.heater_enabled = serial.latest_json.heater_enabled;
                                 pid_status_data.pwm_duty = serial.latest_json.pwm_duty;
+                                pid_values.p = serial.latest_json.kp;
+                                pid_values.i = serial.latest_json.ki;
+                                pid_values.d = serial.latest_json.kd;
                             }
                         } catch (error) {
                             // console.error(`Failed to parse JSON: ${error} | Data: ${serial.latest}`);
@@ -150,6 +155,57 @@ export async function setTargetTemperature(temperature: number) {
     const command = {
         type: "set_target_temperature",
         value: temperature
+    };
+    await sendCommand(JSON.stringify(command));
+}
+
+
+/**
+ * Set the p factor for the PID controller
+ * @param p factor
+ */
+export async function setP(p: number) {
+    const command = {
+        type: "set_kp",
+        value: p
+    };
+    await sendCommand(JSON.stringify(command));
+}
+
+
+/**
+ * Set the override of the force so we can heat even when the force sensor isnt triggered
+ * @param isActive boolean
+ */
+export async function override_force(isActive : boolean) {
+    const command = {
+        type: "override_force",
+        value: isActive
+    };
+    await sendCommand(JSON.stringify(command));
+}
+
+
+/**
+ * Set the i factor for the PID controller
+ * @param i factor
+ */
+export async function setI(I: number) {
+    const command = {
+        type: "set_ki",
+        value: I
+    };
+    await sendCommand(JSON.stringify(command));
+}
+
+/**
+ * Set the D factor for the PID controller
+ * @param D factor
+ */
+export async function setD(D: number) {
+    const command = {
+        type: "set_kd",
+        value: D
     };
     await sendCommand(JSON.stringify(command));
 }
