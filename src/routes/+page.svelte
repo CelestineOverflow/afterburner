@@ -1,4 +1,5 @@
 <script lang="ts">
+    import ForceChart from "$lib/ForceChart.svelte";
     import {
         temperature_data,
         loadcell_data,
@@ -137,6 +138,9 @@
 
     <!-- Load Cell Display -->
     <div class="stat">
+        <div class="stat-figure text-primary">
+            <ForceChart />
+        </div>
         <div class="stat-figure text-secondary">
             <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -153,8 +157,8 @@
             </svg>
         </div>
         <div class="stat-title">Force</div>
-        <!-- <div class="stat-value text-secondary">raw {loadcell_data.loadcell}</div> -->
-        <div class="stat-value text-secondary">force {loadcell_data.loadcell.toFixed(2)}</div>
+        
+        <!-- <div class="stat-value text-secondary">force {loadcell_data.loadcell.toFixed(2)}</div> -->
        
         
         <div class="flex flex-row">

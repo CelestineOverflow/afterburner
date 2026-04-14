@@ -1,51 +1,82 @@
-<!-- <script lang="ts">
-    import { onMount, onDestroy } from "svelte";
-    import Chart from "chart.js/auto";
-    import { force } from "./Serial.svelte";
-    let canvas: HTMLCanvasElement;
-    let chart: Chart<"line", number[], number>;
-    const MAX_POINTS = 100;
-    const labels: string[] = Array(MAX_POINTS).fill("");
-    const values: number[] = Array(MAX_POINTS).fill(0);
-    onMount(() => {
-        const ctx = canvas.getContext("2d")!;
-        chart = new Chart(ctx, {
-            type: "line",
-            data: {
-                labels,
-                datasets: [
-                    {
-                        label: "Force (N)",
-                        data: values,
-                        borderWidth: 2,
-                        pointRadius: 0,
-                    },
-                ],
-            },
-            options: {
-                responsive: true,
-                animation: false,
-            },
-        });
-    });
-    $effect(() => {
-        if (chart && force.current !== undefined) {
-            labels.push(""); // add new timestamp
-            values.push(force.current); // add new force value
-            if (labels.length > MAX_POINTS) {
-                labels.shift(); // keep buffer size
-                values.shift();
+<script lang="ts">
+	import { onMount, onDestroy } from "svelte";
+	import Chart from "chart.js/auto";
+	import { loadcell_data } from "./Serial.svelte";
+
+	let canvas: HTMLCanvasElement;
+	let chart: Chart;
+	
+	const maxPoints = 100; // Maximum number of points to display
+	let labels: string[] = [];
+	let curVals: number[] = [];
+	let tgtVals: number[] = [];
+
+	onMount(() => {
+		const ctx = canvas.getContext("2d")!;
+		chart = new Chart(ctx, {
+			type: "line",
+			data: {
+				labels,
+				datasets: [
+					{
+						label: "current",
+						data: curVals,
+						borderWidth: 2,
+						pointRadius: 0,
+						borderColor: "rgb(56 189 248)",
+						backgroundColor: "rgba(56, 189, 248, 0.1)",
+						fill: false
+					}
+				]
+			},
+			options: {
+				responsive: true,
+				animation: false,
+				maintainAspectRatio: false,
+				plugins: { 
+					legend: { 
+						labels: { color: "#fff" } 
+					}
+				},
+				scales: {
+					x: { 
+						ticks: { color: "#fff" }, 
+						grid: { color: "rgba(255,255,255,0.1)" } 
+					},
+					y: { 
+						ticks: { color: "#fff" }, 
+						grid: { color: "rgba(255,255,255,0.1)" },
+						beginAtZero: false
+					}
+				}
+			}
+		});
+	});
+
+	// Continuously update chart when temperature_data_array changes
+	$effect(() => {
+		if (!chart ) return;
+
+		// Get the latest data point from the array
+		
+		if (loadcell_data) {
+			// Add timestamp or index as label
+			const timestamp = new Date().toLocaleTimeString();
+			labels.push(timestamp);
+			curVals.push(loadcell_data.loadcell);
+
+            // Keep only the latest maxPoints points
+            if (labels.length > maxPoints) {
+                labels.shift();
+                curVals.shift();
             }
-            chart.update("none"); // redraw without animation
+            chart.update();
+
         }
     });
-    onDestroy(() => chart?.destroy());
+
 </script>
 
-
-<div class="card bg-base-100 w-96 shadow-sm">
-  <div class="card-body">
-    <h2 class="card-title">Force</h2>
-      <canvas bind:this={canvas}></canvas>
-  </div>
-</div> -->
+<div class="relative w-48 h-48 overflow-hidden bg-transparent">
+	<canvas bind:this={canvas} class="absolute inset-0"></canvas>
+</div>

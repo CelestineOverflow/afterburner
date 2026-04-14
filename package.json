@@ -24,7 +24,7 @@
     "esptool-js": "^0.5.7",
     "prismjs": "^1.30.0",
     "tailwindcss": "^4.1.18",
-    "tauri-plugin-serialplugin": "^2.12.1"
+    "tauri-plugin-serialplugin-api": "^2.22.0"
   },
   "devDependencies": {
     "@iconify-json/material-symbols-light": "^1.2.28",

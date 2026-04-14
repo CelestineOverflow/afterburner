@@ -1,4 +1,4 @@
-import { SerialPort } from "tauri-plugin-serialplugin";
+import { SerialPort } from "tauri-plugin-serialplugin-api";
 import { sendNotification } from "@tauri-apps/plugin-notification";
 import { listen } from "@tauri-apps/api/event";
 
@@ -48,7 +48,6 @@ export async function connect(path: string) {
                     if (serial.latest.trim().startsWith("{") || serial.latest.trim().startsWith("[")) {
                         try {
                             serial.latest_json = JSON.parse(serial.latest);
-
                             // Handle error messages
                             if (serial.latest_json.type === "error") {
                                 const errorMessage = serial.latest_json.message || "Unknown error";
