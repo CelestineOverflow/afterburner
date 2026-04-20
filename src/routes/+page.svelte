@@ -7,12 +7,9 @@
         pid_status_data,
         setTargetTemperature,
         enableHeater,
-
         setZeroPoint,
-
-        setMultiplier
-
-
+        setMultiplier,
+        serial,
     } from "$lib/Serial.svelte";
     import TemperatureChart from "$lib/TemperatureChart.svelte";
 
@@ -47,8 +44,6 @@
             isSubmitting = false;
         }
     }
-
-
 </script>
 
 <svelte:head>
@@ -70,7 +65,14 @@
         <div class="stat-figure text-primary">
             <TemperatureChart />
         </div>
-        <div class="stat-title text-lg">Current Temperature</div>
+        {#if !serial.connected}
+        <div class="stat-title text-2xl text-warning">Device Disconected</div>
+        {:else if temperature_data.temperature > 50}
+        <div class="stat-title text-2xl text-error">Carefull, Tip is HOT!</div>
+        {:else}
+        <div class="stat-title text-lg text-success">Safe to handle ✅</div>
+        {/if}
+        <div class="stat-title text-lg">Current Temperature  {#if temperature_data.temperature > 100}🔥{:else if temperature_data.temperature > 50}🥵{:else if temperature_data.temperature > 10}😎{:else}🥶{/if}</div>
         <div class="stat-value text-4xl">
             {temperature_data.temperature.toFixed(2)} °C
         </div>
@@ -87,10 +89,11 @@
             </span>
         </div>
     </div>
-
+    <!-- svelte-ignore a11y_label_has_associated_control -->
     <!-- Temperature Control -->
     <div class="stat">
         <div class="form-control gap-1">
+           
             <label class="label py-1">
                 <span class="label-text text-sm">Target Temperature</span>
                 <span class="label-text-alt text-warning text-xs"
@@ -134,56 +137,41 @@
             </div>
         </div>
     </div>
-    
 
     <!-- Load Cell Display -->
     <div class="stat">
         <div class="stat-figure text-primary">
             <ForceChart />
         </div>
-        <div class="stat-figure text-secondary">
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                class="inline-block h-8 w-8 stroke-current"
-            >
-                <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M13 10V3L4 14h7v7l9-11h-7z"
-                ></path>
-            </svg>
-        </div>
         <div class="stat-title">Force</div>
-        
-        <!-- <div class="stat-value text-secondary">force {loadcell_data.loadcell.toFixed(2)}</div> -->
-       
-        
+
+        <div class="stat-value text-large">{(loadcell_data.loadcell).toFixed(2)} g</div>
+
         <div class="flex flex-row">
-        <div class="basis-3xs"> <button
-            class="btn btn-sm btn-outline mt-2"
-            onclick={() => {
-                setZeroPoint();
-            }}
-        >
-            Calibrate Zero
-        </button></div>
-        <div class="basis-2xs"> <button
-            class="btn btn-sm btn-outline mt-2 ml-2"
-            onclick={() => {
-                const userMultiplier = prompt(
-                    "Enter Force in Grams"
-                );
-                if (userMultiplier !== null) {
-                    const parsed = parseFloat(userMultiplier);
-                    setMultiplier(parsed);
-                }
-            }}
-        >
-            Calibrate Force
-        </button></div>
+            <div class="basis-3xs">
+                <button
+                    class="btn btn-sm btn-outline mt-2"
+                    onclick={() => {
+                        setZeroPoint();
+                    }}
+                >
+                    Calibrate Zero
+                </button>
+            </div>
+            <div class="basis-2xs">
+                <button
+                    class="btn btn-sm btn-outline mt-2 ml-2"
+                    onclick={() => {
+                        const userMultiplier = prompt("Enter Force in Grams");
+                        if (userMultiplier !== null) {
+                            const parsed = parseFloat(userMultiplier);
+                            setMultiplier(parsed);
+                        }
+                    }}
+                >
+                    Calibrate Force
+                </button>
+            </div>
         </div>
     </div>
 
@@ -221,8 +209,8 @@
             >
         </div>
         <div class="stat-desc">
-            PWM Duty: <span class="font-bold text-success"
-                > {((pid_status_data.pwm_duty / 255) * 100).toFixed(1)} %</span
+            PWM Duty: <span class="font-bold text-success">
+                {((pid_status_data.pwm_duty / 255) * 100).toFixed(1)} %</span
             >
         </div>
     </div>

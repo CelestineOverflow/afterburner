@@ -4,10 +4,10 @@
   import { SerialPort } from "tauri-plugin-serialplugin-api";
   import { serial, connect } from "$lib/Serial.svelte";
   import { disconnect } from "../lib/Serial.svelte";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { getCurrentWindow, Window } from "@tauri-apps/api/window";
   import Updater from "$lib/Updater.svelte";
 
-  let appWindow = null;
+  let appWindow: Window | null = null;
   let available_ports = $state<string[]>([]);
   let { children } = $props();
 
@@ -204,7 +204,7 @@
     <span class="dock-label">Dashboard</span>
   </a>
 
-  <a href="/docs">
+  <a href="/api">
     <svg
       class="size-[1.2em]"
       xmlns="http://www.w3.org/2000/svg"
@@ -232,6 +232,37 @@
       ></svg
     >
     <span class="dock-label">api</span>
+  </a>
+
+    <a href="/docs">
+    <svg
+      class="size-[1.2em]"
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      ><g fill="currentColor" stroke-linejoin="miter" stroke-linecap="butt"
+        ><polyline
+          points="3 14 9 14 9 17 15 17 15 14 21 14"
+          fill="none"
+          stroke="currentColor"
+          stroke-miterlimit="10"
+          stroke-width="2"
+        ></polyline><rect
+          x="3"
+          y="3"
+          width="18"
+          height="18"
+          rx="2"
+          ry="2"
+          fill="none"
+          stroke="currentColor"
+          stroke-linecap="square"
+          stroke-miterlimit="10"
+          stroke-width="2"
+        ></rect></g
+      ></svg
+    >
+    <span class="dock-label">docs
+    </span>
   </a>
 
   <a href="/config">

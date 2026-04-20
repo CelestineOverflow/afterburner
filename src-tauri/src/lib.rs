@@ -17,6 +17,7 @@ struct AppState {
 async fn hello() -> impl Responder {
    HttpResponse::Ok().body("Hello world!")
 }
+
 #[post("/send")]
 async fn receive_data(
    data: web::Json<serde_json::Value>,

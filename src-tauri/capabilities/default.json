@@ -53,6 +53,14 @@
         { "url": "https://raw.githubusercontent.com/*" }
       ]
     },
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        { "url": "https://api.github.com/*" },
+        { "url": "https://github.com/*" },
+        { "url": "https://raw.githubusercontent.com/*" }
+      ]
+    },
     "http:default",
     "http:allow-fetch",
     "http:allow-fetch-read-body",

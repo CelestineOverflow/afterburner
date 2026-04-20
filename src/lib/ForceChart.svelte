@@ -23,7 +23,7 @@
 						data: curVals,
 						borderWidth: 2,
 						pointRadius: 0,
-						borderColor: "rgb(56 189 248)",
+						borderColor: "rgb(255 10 10)",
 						backgroundColor: "rgba(56, 189, 248, 0.1)",
 						fill: false
 					}
@@ -46,7 +46,9 @@
 					y: { 
 						ticks: { color: "#fff" }, 
 						grid: { color: "rgba(255,255,255,0.1)" },
-						beginAtZero: false
+						beginAtZero: true,
+						// max: 12000
+
 					}
 				}
 			}

@@ -14,8 +14,8 @@
       {
         "decorations": false,
         "title": "afterburner",
-        "width": 450,
-        "height": 700,
+        "width": 500,
+        "height": 800,
         "resizable": false,
         "fullscreen": false
       }
