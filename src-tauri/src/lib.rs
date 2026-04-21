@@ -1,7 +1,22 @@
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
-use std::sync::Mutex;
+use std::{
+    collections::HashMap,
+    env,
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+};
+
+use futures_channel::mpsc::{unbounded, UnboundedSender};
+use futures_util::{future, pin_mut, stream::TryStreamExt, StreamExt};
+
+use tokio::net::{TcpListener, TcpStream};
+use tokio_tungstenite::tungstenite::protocol::Message;
+
+type Tx = UnboundedSender<Message>;
+type PeerMap = Arc<Mutex<HashMap<SocketAddr, Tx>>>;
+
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct ExternalData {
@@ -17,6 +32,55 @@ struct AppState {
 async fn hello() -> impl Responder {
    HttpResponse::Ok().body("Hello world!")
 }
+
+async fn handle_connection(peer_map: PeerMap, raw_stream: TcpStream, addr: SocketAddr) {
+    println!("Incoming TCP connection from: {}", addr);
+
+    let ws_stream = tokio_tungstenite::accept_async(raw_stream)
+        .await
+        .expect("Error during the websocket handshake occurred");
+    println!("WebSocket connection established: {}", addr);
+
+    // Insert the write part of this peer to the peer map.
+    let (tx, rx) = unbounded();
+    peer_map.lock().unwrap().insert(addr, tx);
+
+    let (outgoing, incoming) = ws_stream.split();
+
+    let broadcast_incoming = incoming.try_for_each(|msg| {
+        println!("Received a message from {}: {}", addr, msg.to_text().unwrap());
+        println!("here");
+        future::ok(())
+        
+    });
+
+    let receive_from_others = rx.map(Ok).forward(outgoing);
+
+    pin_mut!(broadcast_incoming, receive_from_others);
+    future::select(broadcast_incoming, receive_from_others).await;
+
+    println!("{} disconnected", &addr);
+    peer_map.lock().unwrap().remove(&addr);
+}
+
+async fn setup_server(_app: AppHandle) {
+  // Do your async setup here instead
+    println!("I run in the background!");
+    let state = PeerMap::new(Mutex::new(HashMap::new()));
+    let addr = env::args().nth(1).unwrap_or_else(|| "127.0.0.1:8080".to_string());
+    // Create the event loop and TCP listener we'll accept connections on.
+    let try_socket = TcpListener::bind(&addr).await;
+    let listener = try_socket.expect("Failed to bind");
+    println!("Listening on: {}", addr);
+
+    // Let's spawn the handling of each connection in a separate task.
+    while let Ok((stream, addr)) = listener.accept().await {
+         tokio::spawn(handle_connection(state.clone(), stream, addr));
+    }
+
+}
+
+
 
 #[post("/send")]
 async fn receive_data(
@@ -51,6 +115,7 @@ pub fn run() {
        .invoke_handler(tauri::generate_handler![greet])
        .setup(|app| {
            let app_handle = app.handle().clone();
+        //    tauri::async_runtime::block_on(setup_server(app.handle().clone()));
            std::thread::spawn(move || {
                let rt = actix_web::rt::System::new();
                rt.block_on(async {
