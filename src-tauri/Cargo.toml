@@ -29,3 +29,4 @@ tauri-plugin-http = { version = "2", features = ["unsafe-headers"] }
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
 actix-web = "4"
+tokio-tungstenite = "0.29"

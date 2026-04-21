@@ -17,8 +17,8 @@
     let isSubmitting = $state(false);
 
     async function handleSetTemperature() {
-        if (targetTemp < 0 || targetTemp > 200) {
-            alert("Temperature must be between 0°C and 200°C");
+        if (targetTemp < 0 || targetTemp > 300) {
+            alert("Temperature must be between 0°C and 300°C");
             return;
         }
 
@@ -97,7 +97,7 @@
             <label class="label py-1">
                 <span class="label-text text-sm">Target Temperature</span>
                 <span class="label-text-alt text-warning text-xs"
-                    >⚠️ 0-200°C</span
+                    >⚠️ 0-300°C</span
                 >
             </label>
             <div class="join w-full">
@@ -109,7 +109,7 @@
                     min="0"
                     max="200"
                     step="0.5"
-                    placeholder="0-200°C"
+                    placeholder="0-300°C"
                     disabled={isSubmitting}
                 />
                 <button
