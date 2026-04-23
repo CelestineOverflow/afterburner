@@ -18,6 +18,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Install frontend deps
         run: npm ci
+      - name: Install sidecar deps
+        working-directory: node-server
+        run: npm ci
       - name: Build & release with Tauri
         uses: tauri-apps/tauri-action@v0
         env:
