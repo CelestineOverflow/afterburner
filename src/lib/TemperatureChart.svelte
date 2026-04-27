@@ -6,7 +6,7 @@
 	let canvas: HTMLCanvasElement;
 	let chart: Chart;
 	
-	const maxPoints = 1000; // Maximum number of points to display
+	const maxPoints = 5000; // Maximum number of points to display
 	let labels: string[] = [];
 	let curVals: number[] = [];
 	let tgtVals: number[] = [];
@@ -34,18 +34,21 @@
 				animation: false,
 				maintainAspectRatio: false,
 				plugins: { 
-					legend: { 
-						labels: { color: "#fff" } 
-					}
+					// legend: { 
+					// 	labels: { color: "#fff" } 
+					// }
+					legend: { display: false }
 				},
 				scales: {
 					x: { 
 						ticks: { color: "#fff" }, 
-						grid: { color: "rgba(255,255,255,0.1)" } 
+						// grid: { color: "rgba(255,255,255,0.1)" }
+						grid: { display: false },
 					},
 					y: { 
 						ticks: { color: "#fff" }, 
-						grid: { color: "rgba(255,255,255,0.1)" },
+						// grid: { color: "rgba(255,255,255,0.1)" },
+						grid: { display: false },
 						beginAtZero: false
 					}
 				}
@@ -62,7 +65,8 @@
 		if (temperature_data) {
 			// Add timestamp or index as label
 			const timestamp = new Date().toLocaleTimeString();
-			labels.push(timestamp);
+			// labels.push(timestamp);
+			labels.push("")
 			curVals.push(temperature_data.temperature);
 
             // Keep only the latest maxPoints points

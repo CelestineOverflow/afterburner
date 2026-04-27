@@ -1,294 +1,245 @@
-import { SerialPort } from "tauri-plugin-serialplugin-api";
 import { sendNotification } from "@tauri-apps/plugin-notification";
-import { listen } from "@tauri-apps/api/event";
+import { io, type Socket } from "socket.io-client";
 
+// ---- config ----
+const SERVER_URL = "http://localhost:3000";
+
+// ---- types ----
+type PortInfo = {
+    path: string;
+    manufacturer: string | null;
+    serialNumber: string | null;
+    vendorId: string | null;
+    productId: string | null;
+};
+
+type SerialStateMsg = {
+    connected: boolean;
+    path: string | null;
+    baudRate: number | null;
+    error?: string;
+};
+
+type Ack = { ok: boolean; error?: string };
+
+// ---- $state stores (same shape as before — components reading these don't change) ----
 export const serial = $state({
     connected: false,
     latest: "",
-    port: null as SerialPort | null,
-    latest_json: {}
+    latest_json: {} as any,
+    path: null as string | null,
+    baudRate: null as number | null,
 });
-
-let buffer = "";
-let unlistenDisconnected: (() => void) | null = null;
 
 export const power_meter_data = $state({ voltage_mv: 0, current_ma: 0, power_mw: 0 });
 export const temperature_data = $state({ temperature: 0.0 });
 export const loadcell_data = $state({ loadcell: 0 });
-export const pid_values = $state({ p: 0.0 , d: 0.0 , i : 0.0});
-
+export const pid_values = $state({ p: 0.0, d: 0.0, i: 0.0 });
 export const pid_status_data = $state({
     type: "",
     target_temperature: 0,
     heater_enabled: false,
-    pwm_duty: 0
+    pwm_duty: 0,
+});
+export const firmware_data = $state({ version: "", idf_version: "", build_time: "", build_date: "", project_name: "" });
+
+
+export const port_list = $state({ ports: [] as PortInfo[] });
+
+// ---- socket.io connection ----
+const socket: Socket = io(SERVER_URL, { autoConnect: true });
+
+socket.on("connect", () => {
+    console.log(`socket connected: ${socket.id}`);
 });
 
+socket.on("disconnect", (reason) => {
+    console.log(`socket disconnected: ${reason}`);
+    serial.connected = false;
+});
 
-export async function connect(path: string) {
-    serial.port = new SerialPort({ path, baudRate: 115200, timeout: 100 });
+socket.on("serial-state", (state: SerialStateMsg) => {
+    const wasConnected = serial.connected;
+    serial.connected = state.connected;
+    serial.path = state.path;
+    serial.baudRate = state.baudRate;
 
-
-    try {
-        await serial.port.open();
-        serial.connected = true;
-        await serial.port.startListening();
-        const unlisten = await listen("external-data", (event) => {
-            console.log("Received external data:", event.payload);
-            sendCommandJson(event.payload);
-        });
-        serial.port.listen((data: Uint8Array | string) => {
-            try {
-                buffer += typeof data === "string" ? data : new TextDecoder().decode(data);
-                let idx: number;
-
-                while ((idx = buffer.indexOf("\n")) !== -1) {
-                    serial.latest = buffer.slice(0, idx).replace(/\r$/, "");
-
-                    if (serial.latest.trim().startsWith("{") || serial.latest.trim().startsWith("[")) {
-                        try {
-                            serial.latest_json = JSON.parse(serial.latest);
-                            // Handle error messages
-                            if (serial.latest_json.type === "error") {
-                                const errorMessage = serial.latest_json.message || "Unknown error";
-                                sendNotification({
-                                    title: "⚠️ Afterburner Error",
-                                    body: errorMessage
-                                });
-                                console.error(`System error: ${errorMessage}`);
-                            }
-
-                            // Handle power meter data
-                            if ("voltage_mv" in serial.latest_json) {
-                                power_meter_data.voltage_mv = serial.latest_json.voltage_mv;
-                                power_meter_data.current_ma = serial.latest_json.current_ma;
-                                power_meter_data.power_mw = serial.latest_json.power_mw;
-                            }
-
-                            // Handle temperature data
-                            if ("temperature" in serial.latest_json) {
-                                temperature_data.temperature = serial.latest_json.temperature;
-                            }
-
-                            // Handle loadcell data
-                            if ("loadcell_force" in serial.latest_json) {
-                                loadcell_data.loadcell = serial.latest_json.loadcell_force;
-
-                            }
-
-                            // Handle PID status
-                            if (serial.latest_json.type === "pid_status") {
-                                pid_status_data.type = serial.latest_json.type;
-                                pid_status_data.target_temperature = serial.latest_json.target_temperature;
-                                pid_status_data.heater_enabled = serial.latest_json.heater_enabled;
-                                pid_status_data.pwm_duty = serial.latest_json.pwm_duty;
-                                pid_values.p = serial.latest_json.kp;
-                                pid_values.i = serial.latest_json.ki;
-                                pid_values.d = serial.latest_json.kd;
-                            }
-                        } catch (error) {
-                            // console.error(`Failed to parse JSON: ${error} | Data: ${serial.latest}`);
-                        }
-                    } else {
-                        console.debug(`Non-JSON message: ${serial.latest}`);
-                    }
-
-                    buffer = buffer.slice(idx + 1);
-                }
-
-            } catch (error) {
-                console.error(`Serial listener error: ${error}`);
-            }
-        });
-
-        unlistenDisconnected = await serial.port.disconnected(() => {
-            sendNotification({ title: "Afterburner", body: "Serial Disconnected" });
-            serial.connected = false;
-            buffer = "";
-            unlistenDisconnected = null;
-            unlisten();
-        });
-
-    } catch (e) {
-        throw new Error(`Failed to open port: ${e}`);
+    if (wasConnected && !state.connected) {
+        sendNotification({ title: "Afterburner", body: "Serial Disconnected" });
     }
+    if (state.error) {
+        console.error(`serial error from server: ${state.error}`);
+    }
+});
+
+socket.on("serial-line", (payload: any) => {
+    serial.latest_json = payload;
+    if (typeof payload?.raw === "string") {
+        serial.latest = payload.raw;
+    } else {
+        try {
+            serial.latest = JSON.stringify(payload);
+        } catch {
+            serial.latest = "";
+        }
+    }
+});
+
+socket.on("power-meter-data", (d: { voltage_mv: number; current_ma: number; power_mw: number }) => {
+    power_meter_data.voltage_mv = d.voltage_mv;
+    power_meter_data.current_ma = d.current_ma;
+    power_meter_data.power_mw = d.power_mw;
+});
+
+socket.on("temperature-data", (d: { temperature: number }) => {
+    temperature_data.temperature = d.temperature;
+});
+
+socket.on("firmware-info", (d: typeof firmware_data) => {
+    console.log("Received firmware data:", d);
+    firmware_data.version = d.version;
+    firmware_data.idf_version = d.idf_version;
+    firmware_data.build_time = d.build_time;
+    firmware_data.build_date = d.build_date;
+    firmware_data.project_name = d.project_name;
+}
+);
+
+socket.on("loadcell-data", (d: { loadcell: number }) => {
+    loadcell_data.loadcell = d.loadcell;
+});
+
+socket.on("pid-values", (d: { p: number; i: number; d: number }) => {
+    pid_values.p = d.p;
+    pid_values.i = d.i;
+    pid_values.d = d.d;
+});
+
+socket.on("pid-status", (d: typeof pid_status_data) => {
+    pid_status_data.type = d.type;
+    pid_status_data.target_temperature = d.target_temperature;
+    pid_status_data.heater_enabled = d.heater_enabled;
+    pid_status_data.pwm_duty = d.pwm_duty;
+});
+
+socket.on("error-notification", (n: { title: string; body: string }) => {
+    sendNotification({ title: n.title, body: n.body });
+    console.error(`Device error: ${n.body}`);
+});
+
+socket.on("port-list", (ports: PortInfo[]) => {
+    port_list.ports = ports;
+});
+
+// ---- port discovery ----
+export function subscribePortList() {
+    socket.emit("subscribe-list-port");
 }
 
-export async function sendCommand(command: string) {
-    console.log(command)
-    if (!serial.port || !serial.connected) {
-        throw new Error("Serial port is not connected");
-    }
-
-    try {
-        await serial.port.write(`${command}\n`);
-        console.debug(`Sent command: ${command}`);
-    } catch (error) {
-        console.error(`Failed to send command: ${error}`);
-        throw error;
-    }
+export function unsubscribePortList() {
+    socket.emit("unsubscribe-list-port");
 }
 
-export async function sendCommandJson(command: any) {
-    console.log(command)
-    if (!serial.port || !serial.connected) {
-        throw new Error("Serial port is not connected");
+// ---- connection control ----
+export async function connect(path: string, baudRate = 115200) {
+    if (!socket.connected) {
+        await new Promise<void>((resolve) => {
+            if (socket.connected) return resolve();
+            socket.once("connect", () => resolve());
+        });
     }
+    socket.emit("connect-serial", { path, baudRate });
+}
 
-    try {
-        await serial.port.write(`${JSON.stringify(command)}\n`);
-        console.debug(`Sent command: ${command}`);
-    } catch (error) {
-        console.error(`Failed to send command: ${error}`);
-        throw error;
-    }
+export async function disconnect() {
+    socket.emit("disconnect-serial");
+}
+
+// ---- typed emit helper ----
+// emits a named event with one argument and waits for the server's ack.
+function emitWithAck(event: string, value?: unknown): Promise<void> {
+    return new Promise((resolve, reject) => {
+        if (!serial.connected) {
+            return reject(new Error("Serial port is not connected"));
+        }
+        socket.emit(event, value, (ack: Ack | undefined) => {
+            if (ack?.ok) resolve();
+            else reject(new Error(ack?.error ?? "Unknown error"));
+        });
+    });
 }
 
 // ==================== Command Functions ====================
+// Same names and signatures as the previous file. Each one is now a single
+// typed emit — the server owns the device-protocol shape.
 
 /**
  * Set the target temperature for the PID controller
  * @param temperature Target temperature in °C
  */
 export async function setTargetTemperature(temperature: number) {
-    const command = {
-        type: "set_target_temperature",
-        value: temperature
-    };
-    await sendCommand(JSON.stringify(command));
+    await emitWithAck("set-target-temperature", temperature);
 }
-
 
 /**
  * Set the p factor for the PID controller
- * @param p factor
  */
 export async function setP(p: number) {
-    const command = {
-        type: "set_kp",
-        value: p
-    };
-    await sendCommand(JSON.stringify(command));
+    await emitWithAck("set-p", p);
 }
-
-
-/**
- * Set the override of the force so we can heat even when the force sensor isnt triggered
- * @param isActive boolean
- */
-export async function override_force(isActive : boolean) {
-    const command = {
-        type: "override_force",
-        value: isActive
-    };
-    await sendCommand(JSON.stringify(command));
-}
-
 
 /**
  * Set the i factor for the PID controller
- * @param i factor
  */
 export async function setI(I: number) {
-    const command = {
-        type: "set_ki",
-        value: I
-    };
-    await sendCommand(JSON.stringify(command));
+    await emitWithAck("set-i", I);
 }
 
 /**
  * Set the D factor for the PID controller
- * @param D factor
  */
 export async function setD(D: number) {
-    const command = {
-        type: "set_kd",
-        value: D
-    };
-    await sendCommand(JSON.stringify(command));
+    await emitWithAck("set-d", D);
+}
+
+/**
+ * Override the force-sensor gate so the heater can run regardless of force reading
+ */
+export async function override_force(isActive: boolean) {
+    await emitWithAck("override-force", isActive);
 }
 
 /**
  * Enable or disable the heater
- * @param enabled true to enable heater, false to disable
  */
 export async function enableHeater(enabled: boolean) {
-    const command = {
-        type: "enable_heater",
-        value: enabled
-    };
-    await sendCommand(JSON.stringify(command));
+    await emitWithAck("enable-heater", enabled);
 }
 
 /**
- * Set the zero pointof the force sensor
- * 
+ * Tare / zero the load cell
  */
 export async function setZeroPoint() {
-    const command = {
-        type: "set_loadcell_zero",
-        value: true
-    };
-    await sendCommand(JSON.stringify(command));
+    await emitWithAck("set-zero-point");
 }
-
-
 
 export async function setMultiplier(current_force: number) {
-    const command = {
-        type: "set_loadcell_multiplier",
-        value: current_force
-    };
-    await sendCommand(JSON.stringify(command));
+    await emitWithAck("set-multiplier", current_force);
 }
 
-
-/**
- * Convenience function to enable the heater
- */
 export async function turnHeaterOn() {
     await enableHeater(true);
 }
 
-/**
- * Convenience function to disable the heater
- */
 export async function turnHeaterOff() {
     await enableHeater(false);
 }
 
 /**
  * Set target temperature and enable heater in one call
- * @param temperature Target temperature in °C
  */
 export async function setTemperatureAndEnable(temperature: number) {
     await setTargetTemperature(temperature);
-    // Small delay to ensure temperature is set before enabling
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 50));
     await enableHeater(true);
-}
-
-export async function disconnect() {
-    if (!serial.port) {
-        return;
-    }
-
-    try {
-        if (unlistenDisconnected) {
-            unlistenDisconnected();
-            unlistenDisconnected = null;
-        }
-
-        await serial.port.cancelListen();
-        await serial.port.close();
-
-        serial.connected = false;
-        buffer = "";
-
-    } catch (error) {
-        console.error(`Error during disconnect: ${error}`);
-        serial.connected = false;
-        buffer = "";
-    }
 }

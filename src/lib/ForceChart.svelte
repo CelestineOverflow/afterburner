@@ -34,18 +34,21 @@
 				animation: false,
 				maintainAspectRatio: false,
 				plugins: { 
-					legend: { 
-						labels: { color: "#fff" } 
-					}
+					// legend: { 
+					// 	labels: { color: "#fff" } 
+					// }
+					legend: { display: false }
 				},
 				scales: {
 					x: { 
 						ticks: { color: "#fff" }, 
-						grid: { color: "rgba(255,255,255,0.1)" } 
+						// grid: { color: "rgba(255,255,255,0.1)" },
+						grid: { display: false }
 					},
 					y: { 
 						ticks: { color: "#fff" }, 
-						grid: { color: "rgba(255,255,255,0.1)" },
+						// grid: { color: "rgba(255,255,255,0.1)" },
+						grid: { display: false },
 						beginAtZero: true,
 						// max: 12000
 
@@ -64,7 +67,7 @@
 		if (loadcell_data) {
 			// Add timestamp or index as label
 			const timestamp = new Date().toLocaleTimeString();
-			labels.push(timestamp);
+			labels.push("");
 			curVals.push(loadcell_data.loadcell);
 
             // Keep only the latest maxPoints points
