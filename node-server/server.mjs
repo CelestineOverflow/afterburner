@@ -11,13 +11,14 @@ import {
 import cors from "cors";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+
+import { DutController, DutState } from "./dut-controller.js";
+
 const FIRMWARE_REPO = "CelestineOverflow/afterburner_firmware";
 extendZodWithOpenApi(z);
-
 const app = express();
 app.use(cors());
 app.use(express.json());
-
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
 const port = 3000;
@@ -30,7 +31,6 @@ const serial = {
   latest_json: {},
 };
 let buffer = "";
-
 const power_meter_data = { voltage_mv: 0, current_ma: 0, power_mw: 0 };
 const temperature_data = { temperature: 0.0 };
 const loadcell_data = { loadcell: 0 };
@@ -41,20 +41,16 @@ const pid_status_data = {
   heater_enabled: false,
   pwm_duty: 0,
 };
-
 const firmware_data = { version: "", idf_version: "", build_time: "", build_date: "", project_name: "" };
-
 let serialState = { connected: false, path: null, baudRate: null };
 
 // ==================== Schemas ====================
 const TemperatureSchema = z
   .object({ temperature: z.number() })
   .openapi("Temperature");
-
 const LoadcellSchema = z
   .object({ loadcell: z.number() })
   .openapi("Loadcell");
-
 const PowerMeterSchema = z
   .object({
     voltage_mv: z.number(),
@@ -62,11 +58,9 @@ const PowerMeterSchema = z
     power_mw: z.number(),
   })
   .openapi("PowerMeter");
-
 const PidValuesSchema = z
   .object({ p: z.number(), i: z.number(), d: z.number() })
   .openapi("PidValues");
-
 const PidStatusSchema = z
   .object({
     type: z.string(),
@@ -75,7 +69,6 @@ const PidStatusSchema = z
     pwm_duty: z.number(),
   })
   .openapi("PidStatus");
-
 const SerialStateSchema = z
   .object({
     connected: z.boolean(),
@@ -84,7 +77,6 @@ const SerialStateSchema = z
     error: z.string().optional(),
   })
   .openapi("SerialState");
-
 const PortInfoSchema = z
   .object({
     path: z.string(),
@@ -94,15 +86,12 @@ const PortInfoSchema = z
     productId: z.string().nullable(),
   })
   .openapi("PortInfo");
-
 const AckSchema = z
   .object({ ok: z.boolean(), error: z.string().optional() })
   .openapi("Ack");
-
 const ApiErrorSchema = z
   .object({ ok: z.boolean(), error: z.string() })
   .openapi("ApiError");
-
 const ConnectRequestSchema = z
   .object({
     path: z.string().openapi({ example: "/dev/ttyACM0" }),
@@ -115,6 +104,40 @@ const ConnectRequestSchema = z
   })
   .openapi("ConnectRequest");
 
+// DUT-specific schemas
+const DutFaultSchema = z
+  .object({
+    code: z.string(),
+    message: z.string(),
+    atMs: z.number(),
+  })
+  .nullable()
+  .openapi("DutFault");
+const DutStateSchema = z
+  .object({
+    mode: z.string().openapi({ example: "ACTIVE" }),
+    target: z.number().nullable(),
+    last_reading: z.number().nullable(),
+    last_update_ms: z.number().nullable(),
+    age_ms: z.number().nullable(),
+    heater_setpoint: z.number(),
+    fault: DutFaultSchema,
+  })
+  .openapi("DutState");
+const DutReadingSchema = z
+  .object({
+    value: z.number().openapi({ example: 65.4, description: "DUT temperature in °C" }),
+    ts: z.number().int().optional().openapi({ description: "Optional client timestamp (ms epoch)" }),
+  })
+  .openapi("DutReading");
+const DutReadingAckSchema = z
+  .object({
+    ok: z.boolean(),
+    accepted: z.boolean(),
+    reason: z.string().optional(),
+  })
+  .openapi("DutReadingAck");
+
 // ==================== Command registry ====================
 const COMMANDS = {
   setTargetTemperature: {
@@ -125,6 +148,17 @@ const COMMANDS = {
     socketEvent: "set-target-temperature",
     httpPath: "/target-temperature",
     summary: "Set the PID target temperature",
+    onSent: (value) => {
+      // If a manual heater target is set while DUT mode is engaged, the user
+      // is taking over: bail out of DUT control rather than fighting them.
+      if (dut && dut.getState().mode !== DutState.IDLE) {
+        dut.setEnabled(false).catch(() => {});
+        io.emit("error-notification", {
+          title: "DUT control disabled",
+          body: "Manual heater target set; DUT closed-loop control was turned off.",
+        });
+      }
+    },
   },
   setP: {
     deviceType: "set_kp",
@@ -186,11 +220,9 @@ const COMMANDS = {
 
 // ---- port discovery ----
 const portListSubscribers = new Set();
-
 function broadcastSerialState() {
   io.emit("serial-state", serialState);
 }
-
 async function listPorts() {
   try {
     const ports = await SerialPort.list();
@@ -205,7 +237,6 @@ async function listPorts() {
     return [];
   }
 }
-
 setInterval(async () => {
   if (portListSubscribers.size === 0) return;
   const ports = await listPorts();
@@ -226,24 +257,20 @@ function handleParsedJson(latest_json) {
     });
     console.error(`System error: ${errorMessage}`);
   }
-
   if ("voltage_mv" in latest_json) {
     power_meter_data.voltage_mv = latest_json.voltage_mv;
     power_meter_data.current_ma = latest_json.current_ma;
     power_meter_data.power_mw = latest_json.power_mw;
     io.emit("power-meter-data", { ...power_meter_data });
   }
-
   if ("temperature" in latest_json) {
     temperature_data.temperature = latest_json.temperature;
     io.emit("temperature-data", { ...temperature_data });
   }
-
   if ("loadcell_force" in latest_json) {
     loadcell_data.loadcell = latest_json.loadcell_force;
     io.emit("loadcell-data", { ...loadcell_data });
   }
-
   if (latest_json.type === "firmware_info") {
     firmware_data.version = latest_json.version;
     firmware_data.idf_version = latest_json.idf_version;
@@ -252,7 +279,6 @@ function handleParsedJson(latest_json) {
     firmware_data.project_name = latest_json.project_name;
     io.emit("firmware-info", { ...firmware_data });
   }
-
   if (latest_json.type === "pid_status") {
     pid_status_data.type = latest_json.type;
     pid_status_data.target_temperature = latest_json.target_temperature;
@@ -271,10 +297,8 @@ function openSerial(path, baudRate = 115200) {
   if (serial.port && serial.port.isOpen) {
     try { serial.port.close(); } catch {}
   }
-
   buffer = "";
   serial.port = new SerialPort({ path, baudRate, autoOpen: false });
-
   serial.port.open((err) => {
     if (err) {
       serialState = { connected: false, path: null, baudRate: null, error: err.message };
@@ -282,13 +306,13 @@ function openSerial(path, baudRate = 115200) {
       broadcastSerialState();
       return;
     }
-      // cdc? 
+    // cdc?
     serial.port.set({ dtr: false, rts: false }, (err) => {
       if (err) {
         console.error("Failed to set DTR/RTS:", err);
       }
     });
-    //delay 100ms 
+    // delay 100ms
     setTimeout(() => {
       serial.port.set({ dtr: true, rts: true }, (err) => {
         if (err) {
@@ -301,13 +325,11 @@ function openSerial(path, baudRate = 115200) {
     broadcastSerialState();
     console.log(`serial opened: ${path} @ ${baudRate}`);
     // ask for the firmware version on connect so we can display it in the UI
-    //{ "type": "get_firmware_version" }
-    // [sidecar] Non-JSON message: I (124) esp_image: segment 3: paddr=00044794 vaddr=40802e48 size{"type":"warning","message":"Unknown command type: {\"type\":\"get_firmware_version\"}"
     writeCommand("get_firmware_version", null).catch((e) => {
       console.error(`Failed to request firmware version: ${e?.message ?? String(e)}`);
     });
   });
-  
+
   serial.port.on("data", (chunk) => {
     try {
       buffer += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
@@ -318,7 +340,6 @@ function openSerial(path, baudRate = 115200) {
         if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
           try {
             serial.latest_json = JSON.parse(serial.latest);
-            // io.emit("serial-line", serial.latest_json);
             handleParsedJson(serial.latest_json);
           } catch {
             io.emit("serial-line", { raw: serial.latest });
@@ -333,19 +354,23 @@ function openSerial(path, baudRate = 115200) {
       console.error(`Serial listener error: ${error}`);
     }
   });
-
   serial.port.on("close", () => {
     serial.connected = false;
     buffer = "";
     serialState = { connected: false, path: null, baudRate: null };
     broadcastSerialState();
+    // If the device disappears while DUT mode is active, drop to IDLE so we
+    // don't try to push setpoints to a closed port and so the user has to
+    // explicitly re-engage when they reconnect.
+    if (dut && dut.getState().mode !== DutState.IDLE) {
+      dut.setEnabled(false).catch(() => {});
+    }
     io.emit("error-notification", {
       title: "Afterburner",
       body: "Serial Disconnected",
     });
     console.log("serial closed");
   });
-
   serial.port.on("error", (err) => {
     console.error("serial error:", err.message);
     serialState = { connected: false, path: null, baudRate: null, error: err.message };
@@ -353,7 +378,6 @@ function openSerial(path, baudRate = 115200) {
     broadcastSerialState();
   });
 }
-
 function closeSerial() {
   if (serial.port && serial.port.isOpen) {
     serial.port.close();
@@ -391,6 +415,30 @@ function writeCommand(type, value) {
   });
 }
 
+// ==================== DUT controller (outer loop) ====================
+const dut = new DutController({
+  writeCommand,
+  getHeaterEnabled: () => pid_status_data.heater_enabled,
+  getPidStatus: () => pid_status_data,
+});
+
+dut.on("state-changed", (s) => {
+  io.emit("dut-state", s);
+});
+dut.on("transition", ({ from, to, reason }) => {
+  console.log(`[dut] ${from} -> ${to}: ${reason}`);
+});
+dut.on("fault", (fault) => {
+  console.error(`[dut] FAULT ${fault.code}: ${fault.message}`);
+  io.emit("error-notification", {
+    title: `⚠️ DUT ${fault.code}`,
+    body: fault.message,
+  });
+});
+dut.on("setpoint-error", ({ error }) => {
+  console.warn(`[dut] setpoint write failed: ${error}`);
+});
+
 // ==================== Socket.IO command handlers ====================
 function registerCommandHandlers(socket) {
   for (const [, spec] of Object.entries(COMMANDS)) {
@@ -407,6 +455,11 @@ function registerCommandHandlers(socket) {
           payload = result.data;
         }
         await writeCommand(spec.deviceType, payload);
+        if (typeof spec.onSent === "function") {
+          try { spec.onSent(payload); } catch (e) {
+            console.warn(`onSent for ${spec.socketEvent} threw: ${e?.message ?? e}`);
+          }
+        }
         if (typeof ack === "function") ack({ ok: true });
       } catch (e) {
         const msg = e?.message || String(e);
@@ -415,6 +468,50 @@ function registerCommandHandlers(socket) {
       }
     });
   }
+
+  // ---- DUT-specific socket handlers ----
+  socket.on("dut-set-target", async (value, ack) => {
+    try {
+      const parsed = z.number().safeParse(value);
+      if (!parsed.success) throw new Error(parsed.error.issues[0].message);
+      dut.setTarget(parsed.data);
+      if (typeof ack === "function") ack({ ok: true });
+    } catch (e) {
+      if (typeof ack === "function") ack({ ok: false, error: e?.message ?? String(e) });
+    }
+  });
+
+  socket.on("dut-enable", async (value, ack) => {
+    try {
+      const parsed = z.boolean().safeParse(value);
+      if (!parsed.success) throw new Error(parsed.error.issues[0].message);
+      await dut.setEnabled(parsed.data);
+      if (typeof ack === "function") ack({ ok: true });
+    } catch (e) {
+      if (typeof ack === "function") ack({ ok: false, error: e?.message ?? String(e) });
+    }
+  });
+
+  socket.on("dut-reading", async (data, ack) => {
+    try {
+      const parsed = DutReadingSchema.safeParse(data);
+      if (!parsed.success) throw new Error(parsed.error.issues[0].message);
+      const { value, ts } = parsed.data;
+      const result = dut.ingestReading(value, ts ?? Date.now());
+      if (typeof ack === "function") ack({ ok: true, ...result });
+    } catch (e) {
+      if (typeof ack === "function") ack({ ok: false, accepted: false, error: e?.message ?? String(e) });
+    }
+  });
+
+  socket.on("dut-reset-fault", async (_value, ack) => {
+    try {
+      dut.resetFault();
+      if (typeof ack === "function") ack({ ok: true });
+    } catch (e) {
+      if (typeof ack === "function") ack({ ok: false, error: e?.message ?? String(e) });
+    }
+  });
 }
 
 // ==================== OpenAPI registry + Express routes ====================
@@ -422,12 +519,8 @@ const apiRegistry = new OpenAPIRegistry();
 const apiRouter = express.Router();
 
 function registerHttpCommand(spec) {
-  // For commands that take a value, the body is { value: X }. For no-payload
-  // commands we omit the request body entirely so we don't emit an empty
-  // schema object that some renderers choke on.
   const bodySchema =
     spec.valueSchema === null ? null : z.object({ value: spec.valueSchema });
-
   const path = {
     method: "post",
     path: `/api${spec.httpPath}`,
@@ -448,15 +541,12 @@ function registerHttpCommand(spec) {
       },
     },
   };
-
   if (bodySchema) {
     path.request = {
       body: { content: { "application/json": { schema: bodySchema } } },
     };
   }
-
   apiRegistry.registerPath(path);
-
   apiRouter.post(spec.httpPath, async (req, res) => {
     try {
       let payload;
@@ -472,6 +562,11 @@ function registerHttpCommand(spec) {
         payload = result.data.value;
       }
       await writeCommand(spec.deviceType, payload);
+      if (typeof spec.onSent === "function") {
+        try { spec.onSent(payload); } catch (e) {
+          console.warn(`onSent for ${spec.httpPath} threw: ${e?.message ?? e}`);
+        }
+      }
       res.json({ ok: true });
     } catch (e) {
       const msg = e?.message || String(e);
@@ -508,6 +603,112 @@ registerStateGetter("/pid-values", "Get the current PID gains", PidValuesSchema,
 registerStateGetter("/pid-status", "Get the current PID controller status", PidStatusSchema, () => pid_status_data);
 registerStateGetter("/serial-state", "Get the current serial port connection state", SerialStateSchema, () => serialState, "Connection");
 registerStateGetter("/firmware-info", "Get the firmware version info", z.object({ version: z.string(), idf_version: z.string(), build_time: z.string(), build_date: z.string(), project_name: z.string() }).openapi("FirmwareInfo"), () => firmware_data, "Firmware");
+
+// ---- DUT routes ----
+registerStateGetter("/dut/state", "Get the DUT closed-loop controller state", DutStateSchema, () => dut.getState(), "DUT");
+
+apiRegistry.registerPath({
+  method: "post",
+  path: "/api/dut/target",
+  summary: "Set the DUT target temperature (closed-loop)",
+  tags: ["DUT"],
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            value: z.number().openapi({ example: 65, description: "Target DUT temperature in °C" }),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: { description: "Target accepted", content: { "application/json": { schema: AckSchema } } },
+    400: { description: "Validation failed", content: { "application/json": { schema: ApiErrorSchema } } },
+  },
+});
+apiRouter.post("/dut/target", (req, res) => {
+  const result = z.object({ value: z.number() }).safeParse(req.body ?? {});
+  if (!result.success) {
+    return res.status(400).json({ ok: false, error: result.error.issues[0].message });
+  }
+  try {
+    dut.setTarget(result.data.value);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e?.message ?? String(e) });
+  }
+});
+
+apiRegistry.registerPath({
+  method: "post",
+  path: "/api/dut/enabled",
+  summary: "Enable or disable DUT closed-loop control",
+  tags: ["DUT"],
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ value: z.boolean().openapi({ example: true }) }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: { description: "State changed", content: { "application/json": { schema: AckSchema } } },
+    400: { description: "Validation failed or fault latched", content: { "application/json": { schema: ApiErrorSchema } } },
+  },
+});
+apiRouter.post("/dut/enabled", async (req, res) => {
+  const result = z.object({ value: z.boolean() }).safeParse(req.body ?? {});
+  if (!result.success) {
+    return res.status(400).json({ ok: false, error: result.error.issues[0].message });
+  }
+  try {
+    await dut.setEnabled(result.data.value);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e?.message ?? String(e) });
+  }
+});
+
+apiRegistry.registerPath({
+  method: "post",
+  path: "/api/dut/reading",
+  summary: "Submit a DUT temperature reading from an external sensor",
+  tags: ["DUT"],
+  request: {
+    body: { content: { "application/json": { schema: DutReadingSchema } } },
+  },
+  responses: {
+    200: { description: "Reading processed (may have been rejected as implausible)", content: { "application/json": { schema: DutReadingAckSchema } } },
+    400: { description: "Validation failed", content: { "application/json": { schema: ApiErrorSchema } } },
+  },
+});
+apiRouter.post("/dut/reading", (req, res) => {
+  const result = DutReadingSchema.safeParse(req.body ?? {});
+  if (!result.success) {
+    return res.status(400).json({ ok: false, error: result.error.issues[0].message });
+  }
+  const { value, ts } = result.data;
+  const r = dut.ingestReading(value, ts ?? Date.now());
+  res.json({ ok: true, ...r });
+});
+
+apiRegistry.registerPath({
+  method: "post",
+  path: "/api/dut/reset",
+  summary: "Reset a latched DUT fault (returns to IDLE)",
+  tags: ["DUT"],
+  responses: {
+    200: { description: "Fault reset (or no-op if not in fault)", content: { "application/json": { schema: AckSchema } } },
+  },
+});
+apiRouter.post("/dut/reset", (req, res) => {
+  dut.resetFault();
+  res.json({ ok: true });
+});
 
 apiRegistry.registerPath({
   method: "get",
@@ -585,7 +786,6 @@ apiRegistry.registerPath({
     },
   },
 });
-
 apiRouter.get("/firmware-download", async (req, res) => {
   const { tag, filename } = req.query;
   if (typeof tag !== "string" || typeof filename !== "string") {
@@ -594,15 +794,12 @@ apiRouter.get("/firmware-download", async (req, res) => {
       error: "tag and filename query params required",
     });
   }
-  // hard guards: prevent traversal and weirdness in the filename
   if (filename.includes("/") || filename.includes("..") || filename.includes("\\")) {
     return res.status(400).json({ ok: false, error: "invalid filename" });
   }
-
   const url = `https://github.com/${FIRMWARE_REPO}/releases/download/${encodeURIComponent(
     tag
   )}/${encodeURIComponent(filename)}`;
-
   try {
     const upstream = await fetch(url, { redirect: "follow" });
     if (!upstream.ok) {
@@ -641,16 +838,13 @@ apiRouter.post("/disconnect", (req, res) => {
 });
 
 // ==================== Generate the OpenAPI spec ====================
-// 3.0.3 instead of 3.1 — Swagger UI and tooling support is more robust there,
-// and 3.1's type-arrays-instead-of-nullable trip up some renderers. Wrapped
-// in try/catch so any schema problem surfaces clearly at startup.
 let openApiDocument;
 try {
   openApiDocument = new OpenApiGeneratorV3(apiRegistry.definitions).generateDocument({
     openapi: "3.0.3",
     info: {
       title: "Afterburner Bridge API",
-      version: "1.0.0",
+      version: "1.1.0",
       description:
         "HTTP API for the Afterburner serial bridge. The same commands are also available over Socket.IO; this API is for external consumers (Python scripts, integrations) that prefer plain HTTP.",
     },
@@ -659,24 +853,22 @@ try {
       { name: "Commands", description: "Write actions to the device" },
       { name: "Telemetry", description: "Read the latest sensor values" },
       { name: "Connection", description: "Manage the serial port itself" },
+      { name: "DUT", description: "Closed-loop control using an external DUT temperature" },
     ],
   });
   const pathCount = Object.keys(openApiDocument.paths || {}).length;
   console.log(`openapi spec generated: ${pathCount} paths`);
 } catch (e) {
   console.error("FAILED to generate OpenAPI document:", e);
-  // serve a minimal stub so the app still boots — better than crashing
   openApiDocument = {
     openapi: "3.0.3",
-    info: { title: "Afterburner Bridge API (degraded)", version: "1.0.0" },
+    info: { title: "Afterburner Bridge API (degraded)", version: "1.1.0" },
     paths: {},
   };
 }
 
-// mount the API + docs
 app.use("/api", apiRouter);
 app.get("/openapi.json", (req, res) => res.json(openApiDocument));
-
 app.get("/docs", (req, res) => {
   res.type("html").send(`<!DOCTYPE html>
 <html lang="en">
@@ -700,6 +892,7 @@ app.get("/docs", (req, res) => {
 </body>
 </html>`);
 });
+
 // ==================== HTTP root + Socket.IO ====================
 app.get("/", (req, res) => {
   res.send(`serial bridge running — docs at <a href="/docs">/docs</a>`);
@@ -708,33 +901,34 @@ app.get("/", (req, res) => {
 io.on("connection", (socket) => {
   console.log(`client connected: ${socket.id}`);
   socket.emit("serial-state", serialState);
-
+  socket.emit("dut-state", dut.getState());
   socket.on("subscribe-list-port", async () => {
     portListSubscribers.add(socket.id);
     socket.emit("port-list", await listPorts());
   });
-
   socket.on("unsubscribe-list-port", () => {
     portListSubscribers.delete(socket.id);
   });
-
   socket.on("connect-serial", ({ path, baudRate } = {}) => {
     if (!path) return;
     portListSubscribers.delete(socket.id);
     openSerial(path, baudRate || 115200);
   });
-
   socket.on("disconnect-serial", () => {
     closeSerial();
   });
-
   registerCommandHandlers(socket);
-
   socket.on("disconnect", () => {
     portListSubscribers.delete(socket.id);
     console.log(`client disconnected: ${socket.id}`);
   });
 });
+
+// Periodically broadcast DUT state so the UI's age_ms keeps updating even
+// when no readings are arriving (so the watchdog UI stays honest).
+setInterval(() => {
+  io.emit("dut-state", dut.getState());
+}, 1000);
 
 httpServer.listen(port, () => {
   console.log(`server running on port ${port}`);

@@ -23553,7 +23553,7 @@ var require_express = __commonJS({
   "node_modules/express/lib/express.js"(exports2, module2) {
     "use strict";
     var bodyParser = require_body_parser();
-    var EventEmitter = require("node:events").EventEmitter;
+    var EventEmitter2 = require("node:events").EventEmitter;
     var mixin = require_merge_descriptors();
     var proto = require_application();
     var Router = require_router();
@@ -23564,7 +23564,7 @@ var require_express = __commonJS({
       var app2 = function(req2, res2, next) {
         app2.handle(req2, res2, next);
       };
-      mixin(app2, EventEmitter.prototype, false);
+      mixin(app2, EventEmitter2.prototype, false);
       mixin(app2, proto, false);
       app2.request = Object.create(req, {
         app: { configurable: true, enumerable: true, writable: true, value: app2 }
@@ -46079,7 +46079,7 @@ var require_extension = __commonJS({
 var require_websocket2 = __commonJS({
   "node_modules/ws/lib/websocket.js"(exports2, module2) {
     "use strict";
-    var EventEmitter = require("events");
+    var EventEmitter2 = require("events");
     var https = require("https");
     var http = require("http");
     var net = require("net");
@@ -46111,7 +46111,7 @@ var require_websocket2 = __commonJS({
     var protocolVersions = [8, 13];
     var readyStates = ["CONNECTING", "OPEN", "CLOSING", "CLOSED"];
     var subprotocolRegex = /^[!#$%&'*+\-.0-9A-Z^_`|a-z~]+$/;
-    var WebSocket = class _WebSocket extends EventEmitter {
+    var WebSocket = class _WebSocket extends EventEmitter2 {
       /**
        * Create a new `WebSocket`.
        *
@@ -47105,7 +47105,7 @@ var require_subprotocol = __commonJS({
 var require_websocket_server = __commonJS({
   "node_modules/ws/lib/websocket-server.js"(exports2, module2) {
     "use strict";
-    var EventEmitter = require("events");
+    var EventEmitter2 = require("events");
     var http = require("http");
     var { Duplex } = require("stream");
     var { createHash } = require("crypto");
@@ -47118,7 +47118,7 @@ var require_websocket_server = __commonJS({
     var RUNNING = 0;
     var CLOSING = 1;
     var CLOSED = 2;
-    var WebSocketServer = class extends EventEmitter {
+    var WebSocketServer = class extends EventEmitter2 {
       /**
        * Create a `WebSocketServer` instance.
        *
@@ -69665,6 +69665,285 @@ var import_zod_to_openapi = __toESM(require_dist4(), 1);
 var import_cors = __toESM(require_lib3(), 1);
 var import_node_stream = require("node:stream");
 var import_promises = require("node:stream/promises");
+
+// dut-controller.js
+var import_node_events = require("node:events");
+var DUT_SOFT_TIMEOUT_MS = 5e3;
+var DUT_HARD_TIMEOUT_MS = 15e3;
+var DUT_MIN_C = -50;
+var DUT_MAX_C = 250;
+var DUT_MAX_STEP_C = 20;
+var DUT_MAX_REJECTS = 5;
+var HEATER_FLOOR_C = 25;
+var HEATER_CEILING_C = 200;
+var SETPOINT_SLEW_C_PER_S = 5;
+var TICK_HZ = 1;
+var RUNAWAY_WINDOW_MS = 9e4;
+var RUNAWAY_MIN_GAP_C = 5;
+var RUNAWAY_MAX_SLOPE_C_PER_S = 0.05;
+var COLD_RISE_SLOPE_C_PER_S = 0.1;
+var DutState = Object.freeze({
+  IDLE: "IDLE",
+  ARMED: "ARMED",
+  ACTIVE: "ACTIVE",
+  STALE_WARN: "STALE_WARN",
+  STALE_FAULT: "STALE_FAULT",
+  RUNAWAY_FAULT: "RUNAWAY_FAULT",
+  SENSOR_FAULT: "SENSOR_FAULT"
+});
+var FAULT_STATES = /* @__PURE__ */ new Set([
+  DutState.STALE_FAULT,
+  DutState.RUNAWAY_FAULT,
+  DutState.SENSOR_FAULT
+]);
+var Pid = class {
+  constructor({ kp = 2, ki = 0.05, kd = 0, iMin = -50, iMax = 50 } = {}) {
+    this.kp = kp;
+    this.ki = ki;
+    this.kd = kd;
+    this.iMin = iMin;
+    this.iMax = iMax;
+    this.integral = 0;
+    this.lastErr = 0;
+    this.lastTs = null;
+  }
+  reset() {
+    this.integral = 0;
+    this.lastErr = 0;
+    this.lastTs = null;
+  }
+  step(setpoint, measured, tsMs) {
+    const err = setpoint - measured;
+    let dt = 0;
+    if (this.lastTs != null) dt = Math.max(0, (tsMs - this.lastTs) / 1e3);
+    if (dt > 0) {
+      this.integral += err * dt;
+      if (this.integral > this.iMax) this.integral = this.iMax;
+      if (this.integral < this.iMin) this.integral = this.iMin;
+    }
+    const deriv = dt > 0 ? (err - this.lastErr) / dt : 0;
+    this.lastErr = err;
+    this.lastTs = tsMs;
+    return this.kp * err + this.ki * this.integral + this.kd * deriv;
+  }
+};
+var DutController = class extends import_node_events.EventEmitter {
+  constructor({ writeCommand: writeCommand2, getHeaterEnabled, getPidStatus } = {}) {
+    super();
+    this.writeCommand = writeCommand2;
+    this.getHeaterEnabled = getHeaterEnabled ?? (() => false);
+    this.getPidStatus = getPidStatus ?? (() => ({ pwm_duty: 0 }));
+    this.state = DutState.IDLE;
+    this.target = null;
+    this.lastReading = null;
+    this.history = [];
+    this.consecutiveRejects = 0;
+    this.fault = null;
+    this.lastSetpoint = HEATER_FLOOR_C;
+    this.lastSetpointTs = Date.now();
+    this.pid = new Pid();
+    this._tick = this._tick.bind(this);
+    this._tickHandle = setInterval(this._tick, 1e3 / TICK_HZ);
+  }
+  destroy() {
+    clearInterval(this._tickHandle);
+    this._tickHandle = null;
+  }
+  // ---- public API ----
+  async setEnabled(on) {
+    if (on) {
+      if (FAULT_STATES.has(this.state)) {
+        throw new Error(`Cannot enable: in fault state ${this.state}. Reset first.`);
+      }
+      if (this.state === DutState.IDLE) {
+        this.pid.reset();
+        this.history = [];
+        this.consecutiveRejects = 0;
+        this._transition(DutState.ARMED, "DUT control enabled");
+        await this._pushSetpoint(HEATER_FLOOR_C, "armed");
+      }
+    } else {
+      if (this.state !== DutState.IDLE) {
+        this._transition(DutState.IDLE, "DUT control disabled");
+        await this._pushSetpoint(HEATER_FLOOR_C, "idle");
+      }
+    }
+  }
+  setTarget(c) {
+    if (typeof c !== "number" || !Number.isFinite(c)) {
+      throw new Error("target must be a finite number");
+    }
+    if (c < DUT_MIN_C || c > DUT_MAX_C) {
+      throw new Error(`target out of range [${DUT_MIN_C}, ${DUT_MAX_C}]`);
+    }
+    this.target = c;
+    this.emit("state-changed", this.getState());
+  }
+  ingestReading(value, tsMs = Date.now()) {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return { accepted: false, reason: "non-finite" };
+    }
+    if (value < DUT_MIN_C || value > DUT_MAX_C) {
+      this._registerReject(`out of range: ${value}`);
+      return { accepted: false, reason: "out-of-range" };
+    }
+    if (this.lastReading) {
+      const dtSec = (tsMs - this.lastReading.ts) / 1e3;
+      if (dtSec >= 0 && dtSec < 5) {
+        const step = Math.abs(value - this.lastReading.value);
+        if (step > DUT_MAX_STEP_C) {
+          this._registerReject(`step too large: ${step.toFixed(2)} \xB0C in ${dtSec.toFixed(2)} s`);
+          return { accepted: false, reason: "step-too-large" };
+        }
+      }
+    }
+    this.consecutiveRejects = 0;
+    this.lastReading = { value, ts: tsMs };
+    this.history.push({ value, ts: tsMs });
+    this._trimHistory(tsMs);
+    if (this.state === DutState.ARMED || this.state === DutState.STALE_WARN) {
+      this._transition(DutState.ACTIVE, "fresh reading received");
+    } else if (this.state === DutState.STALE_FAULT) {
+    }
+    this.emit("state-changed", this.getState());
+    return { accepted: true };
+  }
+  resetFault() {
+    if (!FAULT_STATES.has(this.state)) return;
+    this.fault = null;
+    this.pid.reset();
+    this.history = [];
+    this.consecutiveRejects = 0;
+    this._transition(DutState.IDLE, "fault reset");
+  }
+  getState() {
+    return {
+      mode: this.state,
+      target: this.target,
+      last_reading: this.lastReading?.value ?? null,
+      last_update_ms: this.lastReading?.ts ?? null,
+      age_ms: this.lastReading ? Date.now() - this.lastReading.ts : null,
+      heater_setpoint: this.lastSetpoint,
+      fault: this.fault
+    };
+  }
+  // ---- internal ----
+  _registerReject(reason) {
+    this.consecutiveRejects += 1;
+    if (this.consecutiveRejects >= DUT_MAX_REJECTS) {
+      this._fault(DutState.SENSOR_FAULT, `sensor rejects: ${reason}`);
+    }
+  }
+  _trimHistory(nowMs) {
+    const cutoff = nowMs - RUNAWAY_WINDOW_MS;
+    while (this.history.length && this.history[0].ts < cutoff) {
+      this.history.shift();
+    }
+  }
+  _transition(next, reason) {
+    if (this.state === next) return;
+    const prev = this.state;
+    this.state = next;
+    this.emit("transition", { from: prev, to: next, reason, atMs: Date.now() });
+    this.emit("state-changed", this.getState());
+  }
+  _fault(code, message) {
+    if (this.state === code) return;
+    this.fault = { code, message, atMs: Date.now() };
+    this._transition(code, message);
+    this._pushSetpoint(HEATER_FLOOR_C, `fault: ${code}`).catch(() => {
+    });
+    if (this.writeCommand) {
+      this.writeCommand("enable_heater", false).catch(() => {
+      });
+    }
+    this.emit("fault", this.fault);
+  }
+  async _pushSetpoint(desiredC, reason) {
+    const now = Date.now();
+    const dtSec = Math.max(1e-3, (now - this.lastSetpointTs) / 1e3);
+    const maxStep = SETPOINT_SLEW_C_PER_S * dtSec;
+    let next = desiredC;
+    if (next > this.lastSetpoint + maxStep) next = this.lastSetpoint + maxStep;
+    if (next < this.lastSetpoint - maxStep) next = this.lastSetpoint - maxStep;
+    if (next > HEATER_CEILING_C) next = HEATER_CEILING_C;
+    if (next < HEATER_FLOOR_C) next = HEATER_FLOOR_C;
+    if (Math.abs(next - this.lastSetpoint) < 0.05) return;
+    this.lastSetpoint = next;
+    this.lastSetpointTs = now;
+    if (this.writeCommand) {
+      try {
+        await this.writeCommand("set_target_temperature", next);
+        this.emit("setpoint-pushed", { value: next, reason });
+      } catch (e) {
+        this.emit("setpoint-error", { error: e?.message ?? String(e) });
+      }
+    }
+  }
+  _slope() {
+    if (this.history.length < 2) return 0;
+    const a = this.history[0];
+    const b = this.history[this.history.length - 1];
+    const dt = (b.ts - a.ts) / 1e3;
+    if (dt <= 0) return 0;
+    return (b.value - a.value) / dt;
+  }
+  _checkRunaway(nowMs) {
+    if (this.history.length < 5) return;
+    const windowSpanMs = this.history[this.history.length - 1].ts - this.history[0].ts;
+    if (windowSpanMs < RUNAWAY_WINDOW_MS * 0.5) return;
+    const slope = this._slope();
+    const heaterEnabled = this.getHeaterEnabled();
+    const pwm = this.getPidStatus()?.pwm_duty ?? 0;
+    const gap = (this.target ?? 0) - (this.lastReading?.value ?? 0);
+    if (this.state === DutState.ACTIVE && this.lastSetpoint >= HEATER_CEILING_C - 1 && gap > RUNAWAY_MIN_GAP_C && Math.abs(slope) < RUNAWAY_MAX_SLOPE_C_PER_S) {
+      this._fault(
+        DutState.RUNAWAY_FAULT,
+        `heater pegged but DUT not rising (slope=${slope.toFixed(3)} \xB0C/s, gap=${gap.toFixed(1)} \xB0C)`
+      );
+      return;
+    }
+    if (!heaterEnabled || pwm < 5) {
+      if (slope > COLD_RISE_SLOPE_C_PER_S) {
+        this._fault(
+          DutState.RUNAWAY_FAULT,
+          `DUT rising while heater off (slope=${slope.toFixed(3)} \xB0C/s, pwm=${pwm})`
+        );
+      }
+    }
+  }
+  async _tick() {
+    const now = Date.now();
+    if (this.state === DutState.IDLE) return;
+    if (FAULT_STATES.has(this.state)) return;
+    if (this.lastReading) {
+      const age = now - this.lastReading.ts;
+      if (age > DUT_HARD_TIMEOUT_MS) {
+        this._fault(DutState.STALE_FAULT, `no DUT reading for ${age} ms`);
+        return;
+      }
+      if (age > DUT_SOFT_TIMEOUT_MS && this.state === DutState.ACTIVE) {
+        this._transition(DutState.STALE_WARN, `no DUT reading for ${age} ms`);
+      }
+    } else if (this.state !== DutState.ARMED) {
+      this._transition(DutState.ARMED, "no readings yet");
+    }
+    if (this.state === DutState.ARMED) {
+      await this._pushSetpoint(HEATER_FLOOR_C, "armed-no-readings");
+      return;
+    }
+    if (this.state === DutState.STALE_WARN) return;
+    if (this.state === DutState.ACTIVE && this.target != null && this.lastReading) {
+      this._checkRunaway(now);
+      if (FAULT_STATES.has(this.state)) return;
+      const desired = this.pid.step(this.target, this.lastReading.value, now);
+      const heaterSetpoint = this.target + desired;
+      await this._pushSetpoint(heaterSetpoint, "pid");
+    }
+  }
+};
+
+// server.mjs
 var FIRMWARE_REPO = "CelestineOverflow/afterburner_firmware";
 (0, import_zod_to_openapi.extendZodWithOpenApi)(external_exports);
 var app = (0, import_express.default)();
@@ -69725,13 +70004,46 @@ var ConnectRequestSchema = external_exports.object({
   path: external_exports.string().openapi({ example: "/dev/ttyACM0" }),
   baudRate: external_exports.number().int().positive().optional().openapi({ example: 115200 })
 }).openapi("ConnectRequest");
+var DutFaultSchema = external_exports.object({
+  code: external_exports.string(),
+  message: external_exports.string(),
+  atMs: external_exports.number()
+}).nullable().openapi("DutFault");
+var DutStateSchema = external_exports.object({
+  mode: external_exports.string().openapi({ example: "ACTIVE" }),
+  target: external_exports.number().nullable(),
+  last_reading: external_exports.number().nullable(),
+  last_update_ms: external_exports.number().nullable(),
+  age_ms: external_exports.number().nullable(),
+  heater_setpoint: external_exports.number(),
+  fault: DutFaultSchema
+}).openapi("DutState");
+var DutReadingSchema = external_exports.object({
+  value: external_exports.number().openapi({ example: 65.4, description: "DUT temperature in \xB0C" }),
+  ts: external_exports.number().int().optional().openapi({ description: "Optional client timestamp (ms epoch)" })
+}).openapi("DutReading");
+var DutReadingAckSchema = external_exports.object({
+  ok: external_exports.boolean(),
+  accepted: external_exports.boolean(),
+  reason: external_exports.string().optional()
+}).openapi("DutReadingAck");
 var COMMANDS = {
   setTargetTemperature: {
     deviceType: "set_target_temperature",
     valueSchema: external_exports.number().openapi({ example: 220, description: "Target temperature in \xB0C" }),
     socketEvent: "set-target-temperature",
     httpPath: "/target-temperature",
-    summary: "Set the PID target temperature"
+    summary: "Set the PID target temperature",
+    onSent: (value) => {
+      if (dut && dut.getState().mode !== DutState.IDLE) {
+        dut.setEnabled(false).catch(() => {
+        });
+        io2.emit("error-notification", {
+          title: "DUT control disabled",
+          body: "Manual heater target set; DUT closed-loop control was turned off."
+        });
+      }
+    }
   },
   setP: {
     deviceType: "set_kp",
@@ -69925,6 +70237,10 @@ function openSerial(path, baudRate = 115200) {
     buffer = "";
     serialState = { connected: false, path: null, baudRate: null };
     broadcastSerialState();
+    if (dut && dut.getState().mode !== DutState.IDLE) {
+      dut.setEnabled(false).catch(() => {
+      });
+    }
     io2.emit("error-notification", {
       title: "Afterburner",
       body: "Serial Disconnected"
@@ -69972,6 +70288,27 @@ function writeCommand(type, value) {
     });
   });
 }
+var dut = new DutController({
+  writeCommand,
+  getHeaterEnabled: () => pid_status_data.heater_enabled,
+  getPidStatus: () => pid_status_data
+});
+dut.on("state-changed", (s) => {
+  io2.emit("dut-state", s);
+});
+dut.on("transition", ({ from, to, reason }) => {
+  console.log(`[dut] ${from} -> ${to}: ${reason}`);
+});
+dut.on("fault", (fault) => {
+  console.error(`[dut] FAULT ${fault.code}: ${fault.message}`);
+  io2.emit("error-notification", {
+    title: `\u26A0\uFE0F DUT ${fault.code}`,
+    body: fault.message
+  });
+});
+dut.on("setpoint-error", ({ error: error48 }) => {
+  console.warn(`[dut] setpoint write failed: ${error48}`);
+});
 function registerCommandHandlers(socket) {
   for (const [, spec] of Object.entries(COMMANDS)) {
     socket.on(spec.socketEvent, async (value, ack) => {
@@ -69987,6 +70324,13 @@ function registerCommandHandlers(socket) {
           payload = result.data;
         }
         await writeCommand(spec.deviceType, payload);
+        if (typeof spec.onSent === "function") {
+          try {
+            spec.onSent(payload);
+          } catch (e) {
+            console.warn(`onSent for ${spec.socketEvent} threw: ${e?.message ?? e}`);
+          }
+        }
         if (typeof ack === "function") ack({ ok: true });
       } catch (e) {
         const msg = e?.message || String(e);
@@ -69995,6 +70339,45 @@ function registerCommandHandlers(socket) {
       }
     });
   }
+  socket.on("dut-set-target", async (value, ack) => {
+    try {
+      const parsed = external_exports.number().safeParse(value);
+      if (!parsed.success) throw new Error(parsed.error.issues[0].message);
+      dut.setTarget(parsed.data);
+      if (typeof ack === "function") ack({ ok: true });
+    } catch (e) {
+      if (typeof ack === "function") ack({ ok: false, error: e?.message ?? String(e) });
+    }
+  });
+  socket.on("dut-enable", async (value, ack) => {
+    try {
+      const parsed = external_exports.boolean().safeParse(value);
+      if (!parsed.success) throw new Error(parsed.error.issues[0].message);
+      await dut.setEnabled(parsed.data);
+      if (typeof ack === "function") ack({ ok: true });
+    } catch (e) {
+      if (typeof ack === "function") ack({ ok: false, error: e?.message ?? String(e) });
+    }
+  });
+  socket.on("dut-reading", async (data, ack) => {
+    try {
+      const parsed = DutReadingSchema.safeParse(data);
+      if (!parsed.success) throw new Error(parsed.error.issues[0].message);
+      const { value, ts } = parsed.data;
+      const result = dut.ingestReading(value, ts ?? Date.now());
+      if (typeof ack === "function") ack({ ok: true, ...result });
+    } catch (e) {
+      if (typeof ack === "function") ack({ ok: false, accepted: false, error: e?.message ?? String(e) });
+    }
+  });
+  socket.on("dut-reset-fault", async (_value, ack) => {
+    try {
+      dut.resetFault();
+      if (typeof ack === "function") ack({ ok: true });
+    } catch (e) {
+      if (typeof ack === "function") ack({ ok: false, error: e?.message ?? String(e) });
+    }
+  });
 }
 var apiRegistry = new import_zod_to_openapi.OpenAPIRegistry();
 var apiRouter = import_express.default.Router();
@@ -70039,6 +70422,13 @@ function registerHttpCommand(spec) {
         payload = result.data.value;
       }
       await writeCommand(spec.deviceType, payload);
+      if (typeof spec.onSent === "function") {
+        try {
+          spec.onSent(payload);
+        } catch (e) {
+          console.warn(`onSent for ${spec.httpPath} threw: ${e?.message ?? e}`);
+        }
+      }
       res.json({ ok: true });
     } catch (e) {
       const msg = e?.message || String(e);
@@ -70072,6 +70462,106 @@ registerStateGetter("/pid-values", "Get the current PID gains", PidValuesSchema,
 registerStateGetter("/pid-status", "Get the current PID controller status", PidStatusSchema, () => pid_status_data);
 registerStateGetter("/serial-state", "Get the current serial port connection state", SerialStateSchema, () => serialState, "Connection");
 registerStateGetter("/firmware-info", "Get the firmware version info", external_exports.object({ version: external_exports.string(), idf_version: external_exports.string(), build_time: external_exports.string(), build_date: external_exports.string(), project_name: external_exports.string() }).openapi("FirmwareInfo"), () => firmware_data, "Firmware");
+registerStateGetter("/dut/state", "Get the DUT closed-loop controller state", DutStateSchema, () => dut.getState(), "DUT");
+apiRegistry.registerPath({
+  method: "post",
+  path: "/api/dut/target",
+  summary: "Set the DUT target temperature (closed-loop)",
+  tags: ["DUT"],
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            value: external_exports.number().openapi({ example: 65, description: "Target DUT temperature in \xB0C" })
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    200: { description: "Target accepted", content: { "application/json": { schema: AckSchema } } },
+    400: { description: "Validation failed", content: { "application/json": { schema: ApiErrorSchema } } }
+  }
+});
+apiRouter.post("/dut/target", (req, res) => {
+  const result = external_exports.object({ value: external_exports.number() }).safeParse(req.body ?? {});
+  if (!result.success) {
+    return res.status(400).json({ ok: false, error: result.error.issues[0].message });
+  }
+  try {
+    dut.setTarget(result.data.value);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e?.message ?? String(e) });
+  }
+});
+apiRegistry.registerPath({
+  method: "post",
+  path: "/api/dut/enabled",
+  summary: "Enable or disable DUT closed-loop control",
+  tags: ["DUT"],
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({ value: external_exports.boolean().openapi({ example: true }) })
+        }
+      }
+    }
+  },
+  responses: {
+    200: { description: "State changed", content: { "application/json": { schema: AckSchema } } },
+    400: { description: "Validation failed or fault latched", content: { "application/json": { schema: ApiErrorSchema } } }
+  }
+});
+apiRouter.post("/dut/enabled", async (req, res) => {
+  const result = external_exports.object({ value: external_exports.boolean() }).safeParse(req.body ?? {});
+  if (!result.success) {
+    return res.status(400).json({ ok: false, error: result.error.issues[0].message });
+  }
+  try {
+    await dut.setEnabled(result.data.value);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e?.message ?? String(e) });
+  }
+});
+apiRegistry.registerPath({
+  method: "post",
+  path: "/api/dut/reading",
+  summary: "Submit a DUT temperature reading from an external sensor",
+  tags: ["DUT"],
+  request: {
+    body: { content: { "application/json": { schema: DutReadingSchema } } }
+  },
+  responses: {
+    200: { description: "Reading processed (may have been rejected as implausible)", content: { "application/json": { schema: DutReadingAckSchema } } },
+    400: { description: "Validation failed", content: { "application/json": { schema: ApiErrorSchema } } }
+  }
+});
+apiRouter.post("/dut/reading", (req, res) => {
+  const result = DutReadingSchema.safeParse(req.body ?? {});
+  if (!result.success) {
+    return res.status(400).json({ ok: false, error: result.error.issues[0].message });
+  }
+  const { value, ts } = result.data;
+  const r = dut.ingestReading(value, ts ?? Date.now());
+  res.json({ ok: true, ...r });
+});
+apiRegistry.registerPath({
+  method: "post",
+  path: "/api/dut/reset",
+  summary: "Reset a latched DUT fault (returns to IDLE)",
+  tags: ["DUT"],
+  responses: {
+    200: { description: "Fault reset (or no-op if not in fault)", content: { "application/json": { schema: AckSchema } } }
+  }
+});
+apiRouter.post("/dut/reset", (req, res) => {
+  dut.resetFault();
+  res.json({ ok: true });
+});
 apiRegistry.registerPath({
   method: "get",
   path: "/api/ports",
@@ -70197,14 +70687,15 @@ try {
     openapi: "3.0.3",
     info: {
       title: "Afterburner Bridge API",
-      version: "1.0.0",
+      version: "1.1.0",
       description: "HTTP API for the Afterburner serial bridge. The same commands are also available over Socket.IO; this API is for external consumers (Python scripts, integrations) that prefer plain HTTP."
     },
     servers: [{ url: `http://localhost:${port}`, description: "Local sidecar" }],
     tags: [
       { name: "Commands", description: "Write actions to the device" },
       { name: "Telemetry", description: "Read the latest sensor values" },
-      { name: "Connection", description: "Manage the serial port itself" }
+      { name: "Connection", description: "Manage the serial port itself" },
+      { name: "DUT", description: "Closed-loop control using an external DUT temperature" }
     ]
   });
   const pathCount = Object.keys(openApiDocument.paths || {}).length;
@@ -70213,7 +70704,7 @@ try {
   console.error("FAILED to generate OpenAPI document:", e);
   openApiDocument = {
     openapi: "3.0.3",
-    info: { title: "Afterburner Bridge API (degraded)", version: "1.0.0" },
+    info: { title: "Afterburner Bridge API (degraded)", version: "1.1.0" },
     paths: {}
   };
 }
@@ -70248,6 +70739,7 @@ app.get("/", (req, res) => {
 io2.on("connection", (socket) => {
   console.log(`client connected: ${socket.id}`);
   socket.emit("serial-state", serialState);
+  socket.emit("dut-state", dut.getState());
   socket.on("subscribe-list-port", async () => {
     portListSubscribers.add(socket.id);
     socket.emit("port-list", await listPorts());
@@ -70269,6 +70761,9 @@ io2.on("connection", (socket) => {
     console.log(`client disconnected: ${socket.id}`);
   });
 });
+setInterval(() => {
+  io2.emit("dut-state", dut.getState());
+}, 1e3);
 httpServer.listen(port, () => {
   console.log(`server running on port ${port}`);
   console.log(`docs:        http://localhost:${port}/docs`);
